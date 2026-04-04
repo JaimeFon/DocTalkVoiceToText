@@ -75,9 +75,11 @@ async def handler(websocket):
                     cmd = json.loads(message)
                     if cmd.get("type") == "set_model":
                         new_model = cmd.get("model", "tiny")
+                        logger.info("Cliente solicita modelo '%s'", new_model)
                         if new_model in AVAILABLE_MODELS:
                             client_model = new_model
                             await asyncio.to_thread(get_model, client_model)
+                            logger.info("Modelo '%s' listo, notificando cliente", client_model)
                             await websocket.send(json.dumps({
                                 "type": "model_changed",
                                 "model": client_model,
