@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 
 # Cargar .env si existe
@@ -45,6 +46,7 @@ SAMPLE_RATE = 16000
 # Cache de modelos cargados
 _model_cache: dict[str, WhisperModel] = {}
 _current_model_name = os.environ.get("WHISPER_MODEL", "tiny")
+_model_lock = threading.Lock()
 
 
 def get_model(name: str) -> WhisperModel:
@@ -52,18 +54,20 @@ def get_model(name: str) -> WhisperModel:
     global _current_model_name
     if name not in AVAILABLE_MODELS:
         name = "tiny"
-    if name not in _model_cache:
-        logger.info("Cargando modelo '%s'...", name)
-        _model_cache[name] = WhisperModel(name, device=DEVICE, compute_type=COMPUTE_TYPE)
-        logger.info("Modelo '%s' cargado.", name)
-    _current_model_name = name
-    return _model_cache[name]
+    with _model_lock:
+        if name not in _model_cache:
+            logger.info("Cargando modelo '%s'...", name)
+            _model_cache[name] = WhisperModel(name, device=DEVICE, compute_type=COMPUTE_TYPE)
+            logger.info("Modelo '%s' cargado.", name)
+        _current_model_name = name
+        return _model_cache[name]
 
 
 def _transcribe_sync(model, audio, **kwargs):
-    """Ejecuta transcripción síncronamente (para asyncio.to_thread)."""
-    segments, info = model.transcribe(audio, **kwargs)
-    text_parts = [s.text for s in segments]
+    """Ejecuta transcripción síncronamente (para asyncio.to_thread). Usa lock para proteger ctranslate2."""
+    with _model_lock:
+        segments, info = model.transcribe(audio, **kwargs)
+        text_parts = [s.text for s in segments]
     return text_parts, info
 
 
@@ -77,6 +81,7 @@ async def handler(websocket):
     buffer = np.array([], dtype=np.float32)
     client_model = _current_model_name
     connected = True
+    transcribing = False
 
     try:
         async for message in websocket:
@@ -111,27 +116,35 @@ async def handler(websocket):
             audio_chunk = np.frombuffer(message, dtype=np.float32)
             buffer = np.concatenate((buffer, audio_chunk))
 
-            # Solo transcribir cuando haya suficiente audio
+            # Solo transcribir cuando haya suficiente audio y no esté transcribiendo
             if len(buffer) < SAMPLE_RATE * MIN_AUDIO_SECONDS:
                 continue
+            if transcribing:
+                continue
 
-            model = get_model(client_model)
-            text_parts, info = await asyncio.to_thread(
-                _transcribe_sync, model, buffer,
-                language="es", beam_size=1, vad_filter=True, without_timestamps=True,
-            )
-            text = " ".join(text_parts).strip()
-
-            if text:
-                await websocket.send(json.dumps({
-                    "type": "transcription",
-                    "text": text,
-                    "language": info.language,
-                    "probability": round(info.language_probability, 2),
-                }))
-
-            # Limpiar buffer después de transcribir
+            transcribing = True
+            audio_to_transcribe = buffer.copy()
             buffer = np.array([], dtype=np.float32)
+
+            try:
+                model = get_model(client_model)
+                text_parts, info = await asyncio.to_thread(
+                    _transcribe_sync, model, audio_to_transcribe,
+                    language="es", beam_size=1, vad_filter=True, without_timestamps=True,
+                )
+                text = " ".join(text_parts).strip()
+
+                if text:
+                    await websocket.send(json.dumps({
+                        "type": "transcription",
+                        "text": text,
+                        "language": info.language,
+                        "probability": round(info.language_probability, 2),
+                    }))
+            except Exception:
+                logger.exception("Error en transcripción")
+            finally:
+                transcribing = False
 
     except websockets.exceptions.ConnectionClosed:
         connected = False
