@@ -17,8 +17,14 @@ services:
     volumes:
       - whisper-models:/root/.cache/huggingface
     environment:
-      - WHISPER__MODEL=Systran/faster-whisper-base
+      - WHISPER__MODEL=Systran/faster-whisper-medium
       - WHISPER__INFERENCE_DEVICE=cpu
+      - WHISPER__COMPUTE_TYPE=int8
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
     restart: unless-stopped
 
   # ── Diarización (WhisperX + pyannote) ──────────────────
