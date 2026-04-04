@@ -52,13 +52,6 @@ export default function Home() {
     recordingRef.current = recording;
   }, [recording]);
 
-  // Limpiar recursos al desmontar componente
-  useEffect(() => {
-    return () => {
-      cleanup();
-    };
-  }, [cleanup]);
-
   const downsample = useCallback(
     (buffer: Float32Array, fromRate: number, toRate: number): Float32Array => {
       if (fromRate === toRate) return buffer;
@@ -73,6 +66,35 @@ export default function Home() {
     },
     []
   );
+
+  const cleanup = useCallback(() => {
+    cancelAnimationFrame(volumeRafRef.current);
+    setVolume(0);
+
+    workletRef.current?.disconnect();
+    analyserRef.current?.disconnect();
+    sourceRef.current?.disconnect();
+    audioCtxRef.current?.close();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.close();
+    }
+
+    wsRef.current = null;
+    audioCtxRef.current = null;
+    sourceRef.current = null;
+    workletRef.current = null;
+    analyserRef.current = null;
+    streamRef.current = null;
+  }, []);
+
+  // Limpiar recursos al desmontar componente
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, [cleanup]);
 
   // Indicador de volumen con AnalyserNode
   const startVolumeMonitor = useCallback((analyser: AnalyserNode) => {
@@ -165,7 +187,6 @@ export default function Home() {
       };
 
       source.connect(worklet);
-      worklet.connect(audioCtx.destination);
 
       setRecording(true);
     } catch (err) {
@@ -176,27 +197,17 @@ export default function Home() {
     }
   }, [downsample, selectedModel, startVolumeMonitor, cleanup]);
 
-  const cleanup = useCallback(() => {
-    cancelAnimationFrame(volumeRafRef.current);
-    setVolume(0);
-
-    workletRef.current?.disconnect();
-    analyserRef.current?.disconnect();
-    sourceRef.current?.disconnect();
-    audioCtxRef.current?.close();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.close();
-    }
-
-    wsRef.current = null;
-    audioCtxRef.current = null;
-    sourceRef.current = null;
-    workletRef.current = null;
-    analyserRef.current = null;
-    streamRef.current = null;
-  }, []);
+  // Cambiar modelo en caliente
+  const changeModel = useCallback(
+    (modelId: string) => {
+      setSelectedModel(modelId);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setModelLoading(true);
+        wsRef.current.send(JSON.stringify({ type: "set_model", model: modelId }));
+      }
+    },
+    []
+  );
 
   const stopRecording = useCallback(() => {
     cleanup();
@@ -215,18 +226,6 @@ export default function Home() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [transcription]);
-
-  // Cambiar modelo en caliente
-  const changeModel = useCallback(
-    (modelId: string) => {
-      setSelectedModel(modelId);
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        setModelLoading(true);
-        wsRef.current.send(JSON.stringify({ type: "set_model", model: modelId }));
-      }
-    },
-    []
-  );
 
   return (
     <div className="min-h-screen p-6 md:p-10 max-w-4xl mx-auto">

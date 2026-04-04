@@ -7,6 +7,7 @@ Permite cambiar de modelo en caliente desde el frontend.
 import asyncio
 import json
 import logging
+import os
 
 import numpy as np
 import websockets
@@ -15,8 +16,8 @@ from faster_whisper import WhisperModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voicetotext")
 
-DEVICE = "cpu"            # "cuda" si tienes GPU NVIDIA
-COMPUTE_TYPE = "int8"     # int8 para CPU, float16 para GPU
+DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
+COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
 
 AVAILABLE_MODELS = {
     "tiny":     {"size": "75 MB",  "quality": "Baja"},
@@ -32,7 +33,7 @@ SAMPLE_RATE = 16000
 
 # Cache de modelos cargados
 _model_cache: dict[str, WhisperModel] = {}
-_current_model_name = "tiny"
+_current_model_name = os.environ.get("WHISPER_MODEL", "tiny")
 
 
 def get_model(name: str) -> WhisperModel:
@@ -56,7 +57,7 @@ def _transcribe_sync(model, audio, **kwargs):
 
 
 # Pre-cargar el modelo por defecto
-get_model("tiny")
+get_model(_current_model_name)
 
 
 async def handler(websocket):
@@ -148,8 +149,8 @@ async def handler(websocket):
 
 
 async def main():
-    host = "localhost"
-    port = 9000
+    host = os.environ.get("WS_HOST", "localhost")
+    port = int(os.environ.get("WS_PORT", "9000"))
     logger.info("Servidor WebSocket en ws://%s:%d", host, port)
     async with websockets.serve(handler, host, port, max_size=2**20):
         await asyncio.Future()
