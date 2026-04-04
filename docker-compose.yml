@@ -1,0 +1,40 @@
+services:
+
+  # ── Faster-Whisper Server (backend de transcripción) ───
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    # Para GPU NVIDIA, usar:
+    #   image: fedirz/faster-whisper-server:latest-cuda
+    #   deploy:
+    #     resources:
+    #       reservations:
+    #         devices:
+    #           - driver: nvidia
+    #             count: 1
+    #             capabilities: [gpu]
+    ports:
+      - "8000:8000"
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    environment:
+      - WHISPER__MODEL=Systran/faster-whisper-base
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+
+  # ── Frontend Next.js + WS Proxy ────────────────────────
+  frontend:
+    build: .
+    ports:
+      - "3005:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - NEXT_PUBLIC_WS_URL=/ws
+      - NEXT_PUBLIC_DEFAULT_MODEL=base
+      - BACKEND_WS_URL=ws://whisper:8000/v1/audio/transcriptions
+    depends_on:
+      - whisper
+    restart: unless-stopped
+
+volumes:
+  whisper-models:
