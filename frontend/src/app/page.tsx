@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:9000";
+function getWsUrl(): string {
+  const env = process.env.NEXT_PUBLIC_WS_URL || "/ws";
+  // Si es ruta absoluta (ws:// o wss://), usar directamente
+  if (env.startsWith("ws://") || env.startsWith("wss://")) return env;
+  // Ruta relativa: construir desde la ubicación actual
+  if (typeof window === "undefined") return env;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}${env}`;
+}
+
 const TARGET_SAMPLE_RATE = 16000;
 
 interface TranscriptionEntry {
@@ -117,7 +126,7 @@ export default function Home() {
     try {
       setStatus("Conectando...");
 
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
