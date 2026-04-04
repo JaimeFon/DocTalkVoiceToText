@@ -28,7 +28,7 @@ export default function Home() {
   const [recording, setRecording] = useState(false);
   const [status, setStatus] = useState("Listo");
   const [volume, setVolume] = useState(0);
-  const [selectedModel, setSelectedModel] = useState("tiny");
+  const [selectedModel, setSelectedModel] = useState(process.env.NEXT_PUBLIC_DEFAULT_MODEL || "base");
   const [modelLoading, setModelLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 

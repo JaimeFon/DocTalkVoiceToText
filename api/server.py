@@ -8,6 +8,17 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
+
+# Cargar .env si existe
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
 
 import numpy as np
 import websockets
@@ -28,7 +39,7 @@ AVAILABLE_MODELS = {
 }
 
 # Mínimo de audio (en segundos) antes de transcribir
-MIN_AUDIO_SECONDS = 1.0
+MIN_AUDIO_SECONDS = float(os.environ.get("MIN_AUDIO_SECONDS", "1.0"))
 SAMPLE_RATE = 16000
 
 # Cache de modelos cargados
