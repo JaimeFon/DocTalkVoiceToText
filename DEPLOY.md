@@ -121,7 +121,127 @@ docker compose up -d
 
 ---
 
-## 3. GPU con NVIDIA
+## 3. Despliegue sin Docker (Python nativo)
+
+Si tu PC **no soporta virtualización** o no quieres usar Docker, puedes correr Whisper y la diarización directamente con Python.
+
+### 3.1 Requisitos
+
+| Herramienta | Versión mínima |
+|---|---|
+| Python | 3.10+ |
+| pip | 22+ |
+| ffmpeg | 6+ |
+| Node.js | 18+ |
+
+**Instalar ffmpeg** (necesario para procesar audio):
+
+```powershell
+# Opción A — con winget
+winget install Gyan.FFmpeg
+
+# Opción B — con choco
+choco install ffmpeg
+
+# Verificar
+ffmpeg -version
+```
+
+### 3.2 Instalar y ejecutar Faster-Whisper Server
+
+```powershell
+# Crear entorno virtual (recomendado)
+python -m venv whisper-env
+.\whisper-env\Scripts\Activate.ps1
+
+# Instalar faster-whisper-server
+pip install faster-whisper-server
+
+# Ejecutar (descarga el modelo la primera vez)
+faster-whisper-server --host 0.0.0.0 --port 8000
+```
+
+Para configurar el modelo y dispositivo, usa variables de entorno:
+
+```powershell
+# PowerShell — modelo medium con CPU (int8 para ahorrar RAM)
+$env:WHISPER__MODEL = "Systran/faster-whisper-medium"
+$env:WHISPER__INFERENCE_DEVICE = "cpu"
+$env:WHISPER__COMPUTE_TYPE = "int8"
+
+faster-whisper-server --host 0.0.0.0 --port 8000
+```
+
+Verificar:
+
+```powershell
+curl http://localhost:8000/health
+```
+
+### 3.3 Instalar y ejecutar la diarización (opcional)
+
+```powershell
+# Crear otro entorno virtual
+python -m venv diarize-env
+.\diarize-env\Scripts\Activate.ps1
+
+# Instalar PyTorch CPU
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Instalar dependencias de diarización
+pip install faster-whisper "whisperx @ git+https://github.com/m-bain/whisperx.git"
+pip install "pyannote.audio>=3.1" fastapi "uvicorn[standard]" python-multipart
+
+# Configurar token de HuggingFace (necesario para pyannote)
+$env:HF_TOKEN = "hf_TU_TOKEN_AQUI"
+
+# Ejecutar el servidor de diarización
+cd diarize-server
+uvicorn main:app --host 0.0.0.0 --port 8001
+```
+
+> **Nota:** Antes de ejecutar, acepta las licencias de pyannote en:
+> - https://huggingface.co/pyannote/segmentation-3.0
+> - https://huggingface.co/pyannote/speaker-diarization-3.1
+
+### 3.4 Ejecutar el frontend
+
+```powershell
+# En otra terminal
+npm install
+npm run build
+npm run start
+```
+
+Abre **http://localhost:3005** en el navegador.
+
+### 3.5 Ejecutar como servicios permanentes
+
+Para que Whisper y la diarización no dependan de una terminal abierta, usa **NSSM**:
+
+```powershell
+# Whisper como servicio Windows
+nssm install WhisperServer "C:\ruta\whisper-env\Scripts\faster-whisper-server.exe"
+nssm set WhisperServer AppParameters "--host 0.0.0.0 --port 8000"
+nssm set WhisperServer AppEnvironmentExtra ^
+    "WHISPER__MODEL=Systran/faster-whisper-medium" ^
+    "WHISPER__INFERENCE_DEVICE=cpu" ^
+    "WHISPER__COMPUTE_TYPE=int8"
+nssm start WhisperServer
+
+# Diarización como servicio Windows
+nssm install DiarizeServer "C:\ruta\diarize-env\Scripts\uvicorn.exe"
+nssm set DiarizeServer AppParameters "main:app --host 0.0.0.0 --port 8001"
+nssm set DiarizeServer AppDirectory "D:\ruta\DocTalkVoiceToText\diarize-server"
+nssm set DiarizeServer AppEnvironmentExtra "HF_TOKEN=hf_TU_TOKEN"
+nssm start DiarizeServer
+```
+
+> El `.env` del frontend no cambia — `WHISPER_API_URL=http://localhost:8000` y `DIARIZE_API_URL=http://localhost:8001` apuntan igual con o sin Docker.
+
+---
+
+## 4. GPU con NVIDIA
 
 Edita `docker-compose.yml`:
 
@@ -148,7 +268,7 @@ services:
 
 ---
 
-## 4. Modelos disponibles
+## 5. Modelos disponibles
 
 | Modelo | Tamaño | Calidad | RAM mínima |
 |---|---|---|---|
@@ -162,7 +282,7 @@ Cambia el modelo en `docker-compose.yml` → `WHISPER__MODEL` o desde la UI del 
 
 ---
 
-## 5. Variables de entorno
+## 6. Variables de entorno
 
 | Variable | Default | Descripción |
 |---|---|---|
@@ -177,7 +297,7 @@ Sin Docker, crear un archivo `.env` en la raíz del proyecto.
 
 ---
 
-## 6. Endpoints disponibles
+## 7. Endpoints disponibles
 
 | Ruta | Método | Descripción |
 |---|---|---|
@@ -196,7 +316,7 @@ curl -X POST http://localhost:3005/api/transcribe `
 
 ---
 
-## 7. Rebuild y actualización
+## 8. Rebuild y actualización
 
 ```powershell
 # Actualizar imagen de Whisper
@@ -214,7 +334,7 @@ docker compose up -d
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problema | Solución |
 |---|---|
