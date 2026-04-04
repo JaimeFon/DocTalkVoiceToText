@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "VoiceToText - Transcripción en tiempo real",
-  description: "Transcripción de voz a texto en español usando Whisper",
+  title: "DocTalk VoiceToText — Transcripción en tiempo real",
+  description:
+    "Transcribe voz a texto en español en tiempo real usando Whisper. Procesamiento 100% local, sin enviar audio a la nube.",
+  icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({
