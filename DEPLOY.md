@@ -8,56 +8,122 @@
 
 | Herramienta | Versión mínima | Notas |
 |---|---|---|
-| Docker | 24+ | Incluye Docker Compose v2 |
-| Node.js | 18+ | Solo si se ejecuta sin Docker |
-| npm | 9+ | Solo si se ejecuta sin Docker |
+| Docker Desktop | 4.x+ | Para correr Faster-Whisper |
+| Node.js | 18+ | Para el frontend Next.js |
+| npm | 9+ | |
+| IIS | 10+ | Con URL Rewrite + ARR |
 
 ---
 
-## 1. Despliegue con Docker (recomendado)
+## 1. Despliegue en Windows con IIS + Docker (recomendado)
 
-### 1.1 Inicio rápido
+Esta es la arquitectura de producción: **IIS** como reverse proxy público, **Node.js** sirviendo el frontend, y **Docker** corriendo Faster-Whisper.
 
-```bash
-# Clonar el repositorio
-git clone <url-del-repo>
-cd DocTalkVoiceToText
-
-# Levantar todo el stack
-docker compose up -d
+```
+Internet → IIS (:80/:443) → Node.js (:3005) → Docker Whisper (:8000)
 ```
 
-El frontend estará disponible en **http://localhost:3005** y el servidor Whisper en **http://localhost:8000**.
+### 1.1 Levantar Faster-Whisper en Docker
 
-### 1.2 Estructura Docker
+```powershell
+# Solo el servicio whisper (el frontend corre nativo)
+docker compose up whisper -d
+```
 
-| Servicio | Imagen | Puerto | Descripción |
-|---|---|---|---|
-| `whisper` | `fedirz/faster-whisper-server:latest-cpu` | 8000 | Motor de transcripción |
-| `frontend` | Build local (`Dockerfile`) | 3005 | Next.js + WS Proxy |
+Verificar que responde:
 
-### 1.3 Verificar que funciona
-
-```bash
-# Ver logs de ambos servicios
-docker compose logs -f
-
-# Verificar que Whisper responde
+```powershell
 curl http://localhost:8000/health
 ```
 
-### 1.4 Detener el stack
+### 1.2 Configurar el frontend
 
-```bash
-docker compose down           # Detener servicios
-docker compose down -v        # Detener y borrar volúmenes (modelos descargados)
+```powershell
+# Instalar dependencias
+npm install
+
+# Ajustar .env (el puerto debe coincidir con el rewrite de IIS)
+# PORT=3005
+# WHISPER_API_URL=http://localhost:8000
+
+# Build de producción
+npm run build
+
+# Iniciar el servidor
+npm run start
+```
+
+El frontend queda escuchando en `http://localhost:3005`.
+
+### 1.3 Configurar IIS como reverse proxy
+
+**Requisitos de IIS:**
+
+1. **URL Rewrite Module** — [Descargar](https://www.iis.net/downloads/microsoft/url-rewrite)
+2. **Application Request Routing (ARR)** — [Descargar](https://www.iis.net/downloads/microsoft/application-request-routing)
+3. **WebSocket Protocol** — Activar en *Panel de control → Programas → Características de Windows → IIS → WebSocket Protocol*
+
+**Pasos:**
+
+1. En **IIS Manager → ARR → Server Proxy Settings** → Marcar *Enable proxy*
+2. Crear un sitio en IIS apuntando a una carpeta vacía (o la carpeta del proyecto)
+3. Copiar el archivo `web.config` incluido en el repo a la carpeta raíz del sitio IIS
+4. Ajustar el puerto en `web.config` si no es 3005:
+
+```xml
+<!-- web.config — las dos reglas apuntan al mismo puerto -->
+<action type="Rewrite" url="http://localhost:3005/{R:1}" />
+```
+
+5. Reiniciar el sitio en IIS
+
+> **Importante:** El `web.config` incluye una regla para WebSocket upgrade (`WS-Proxy`) que detecta el header `Upgrade: websocket` y lo reenvía correctamente a Node.js. Sin esto, la transcripción en tiempo real no funciona.
+
+### 1.4 Ejecutar como servicio Windows
+
+Para que Node.js no dependa de una ventana de terminal abierta:
+
+**Opción A — PM2 (recomendado):**
+
+```powershell
+npm install -g pm2
+pm2 start "npm run start" --name voicetotext
+pm2 save
+pm2 startup     # Seguir instrucciones para que arranque con Windows
+```
+
+**Opción B — NSSM (Non-Sucking Service Manager):**
+
+```powershell
+# Descargar nssm de https://nssm.cc
+nssm install VoiceToText "C:\Program Files\nodejs\node.exe" "D:\path\to\server.js"
+nssm set VoiceToText AppDirectory "D:\path\to\DocTalkVoiceToText"
+nssm set VoiceToText AppEnvironmentExtra "PORT=3005" "NODE_ENV=production" "WHISPER_API_URL=http://localhost:8000"
+nssm start VoiceToText
 ```
 
 ---
 
-## 2. GPU con NVIDIA
+## 2. Despliegue con Docker Compose (todo en contenedores)
 
-Para usar GPU y obtener transcripciones más rápidas, edita `docker-compose.yml`:
+Si prefieres no instalar Node.js en el host:
+
+```powershell
+docker compose up -d
+```
+
+| Servicio | Puerto | Descripción |
+|---|---|---|
+| `whisper` | 8000 | Faster-Whisper Server (CPU) |
+| `frontend` | 3005 | Next.js + WS Bridge |
+
+**IIS** apunta su rewrite a `localhost:3005` igual que en la opción nativa.
+
+---
+
+## 3. GPU con NVIDIA
+
+Edita `docker-compose.yml`:
 
 ```yaml
 services:
@@ -75,16 +141,16 @@ services:
       - WHISPER__INFERENCE_DEVICE=cuda
 ```
 
-**Requisitos GPU:**
-- Docker con [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+**Requisitos:**
+- Docker Desktop con WSL2 backend
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 - Driver NVIDIA 525+
-- CUDA 12.0+
 
 ---
 
-## 3. Modelos disponibles
+## 4. Modelos disponibles
 
-| Modelo | Tamaño | Calidad | VRAM mínima |
+| Modelo | Tamaño | Calidad | RAM mínima |
 |---|---|---|---|
 | `Systran/faster-whisper-tiny` | 75 MB | Baja | 1 GB |
 | `Systran/faster-whisper-base` | 140 MB | Media | 1 GB |
@@ -92,46 +158,7 @@ services:
 | `Systran/faster-whisper-medium` | 1.5 GB | Muy buena | 5 GB |
 | `Systran/faster-whisper-large-v3` | 3 GB | Excelente | 10 GB |
 
-Cambia el modelo en `docker-compose.yml` → `WHISPER__MODEL` o selecciónalo desde la UI del frontend.
-
----
-
-## 4. Despliegue sin Docker
-
-### 4.1 Backend — Faster-Whisper Server
-
-```bash
-pip install faster-whisper-server
-faster-whisper-server --host 0.0.0.0 --port 8000
-```
-
-### 4.2 Frontend — Next.js
-
-```bash
-cd DocTalkVoiceToText
-
-# Instalar dependencias
-npm install
-
-# Configurar variables
-cp .env.example .env   # o crear .env manualmente (ver abajo)
-
-# Build de producción
-npm run build
-npm run start
-```
-
-### 4.3 Con PM2 (producción)
-
-```bash
-npm install -g pm2
-
-# Frontend
-pm2 start "npm run start" --name voicetotext-frontend
-
-# Ver logs
-pm2 logs voicetotext-frontend
-```
+Cambia el modelo en `docker-compose.yml` → `WHISPER__MODEL` o desde la UI del frontend.
 
 ---
 
@@ -140,37 +167,61 @@ pm2 logs voicetotext-frontend
 | Variable | Default | Descripción |
 |---|---|---|
 | `PORT` | `3000` | Puerto del servidor Node.js |
-| `NODE_ENV` | `development` | `production` para builds optimizados |
-| `NEXT_PUBLIC_WS_URL` | `/ws` | Ruta WebSocket del frontend |
-| `NEXT_PUBLIC_DEFAULT_MODEL` | `base` | Modelo Whisper por defecto |
-| `BACKEND_WS_URL` | `ws://localhost:9000` | URL WebSocket del backend Whisper |
+| `NODE_ENV` | `production` | `production` para builds optimizados |
+| `NEXT_PUBLIC_WS_URL` | `/ws` | Ruta WebSocket (relativa al dominio) |
+| `NEXT_PUBLIC_DEFAULT_MODEL` | `base` | Modelo Whisper por defecto en la UI |
+| `WHISPER_API_URL` | `http://localhost:8000` | URL del REST API de Faster-Whisper |
 
-En Docker, las variables se definen en `docker-compose.yml` → `environment`.
+En Docker `compose`, las variables van en `environment:`.
 Sin Docker, crear un archivo `.env` en la raíz del proyecto.
 
 ---
 
-## 6. Rebuild y actualización
+## 6. Endpoints disponibles
 
-```bash
-# Actualizar imagen del backend
+| Ruta | Método | Descripción |
+|---|---|---|
+| `/` | GET | UI de transcripción en tiempo real |
+| `/ws` | WebSocket | Streaming PCM → transcripción (vía `server.js`) |
+| `/api/transcribe` | POST | Subir archivo de audio → transcripción (REST) |
+
+### Ejemplo: transcribir un archivo por REST
+
+```powershell
+curl -X POST http://localhost:3005/api/transcribe `
+  -F "file=@audio.wav" `
+  -F "model=base" `
+  -F "language=es"
+```
+
+---
+
+## 7. Rebuild y actualización
+
+```powershell
+# Actualizar imagen de Whisper
 docker compose pull whisper
+docker compose up whisper -d
 
 # Rebuild del frontend (tras cambios en el código)
-docker compose build frontend
+npm run build
+pm2 restart voicetotext   # o reiniciar el servicio
 
-# Reiniciar todo
+# Si usas Docker para el frontend también
+docker compose build frontend
 docker compose up -d
 ```
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Problema | Solución |
 |---|---|
-| "Error de conexión" en el frontend | Verificar que el servicio `whisper` está corriendo: `docker compose ps` |
-| No se escucha audio / volumen en 0 | Dar permisos de micrófono al navegador |
-| Transcripción lenta | Usar un modelo más pequeño o activar GPU |
-| Puerto ocupado | Cambiar puertos en `docker-compose.yml` → `ports` |
-| El modelo tarda en cargar | La primera vez se descarga; posteriores usan caché del volumen `whisper-models` |
+| "Error de conexión" en el frontend | Verificar Whisper: `docker compose ps` y `curl http://localhost:8000/health` |
+| WebSocket no conecta a través de IIS | Verificar que WebSocket Protocol está activado en IIS y ARR proxy habilitado |
+| No se escucha audio / volumen en 0 | Dar permisos de micrófono en el navegador (requiere HTTPS o localhost) |
+| Transcripción lenta | Usar modelo más pequeño (`tiny` o `base`) o activar GPU |
+| Puerto ocupado | Cambiar `PORT` en `.env` y actualizar `web.config` |
+| El modelo tarda en cargar | Primera vez descarga el modelo; posteriores usan caché del volumen Docker |
+| IIS devuelve 502 Bad Gateway | Node.js no está corriendo en el puerto configurado |

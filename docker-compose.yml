@@ -21,7 +21,10 @@ services:
       - WHISPER__INFERENCE_DEVICE=cpu
     restart: unless-stopped
 
-  # ── Frontend Next.js + WS Proxy ────────────────────────
+  # ── (Opcional) Frontend en Docker ──────────────────────
+  # En Windows + IIS se recomienda correr el frontend con Node.js nativo
+  # y usar solo el servicio "whisper" de este compose.
+  # Para levantar solo Whisper: docker compose up whisper -d
   frontend:
     build: .
     ports:
@@ -31,7 +34,7 @@ services:
       - NODE_ENV=production
       - NEXT_PUBLIC_WS_URL=/ws
       - NEXT_PUBLIC_DEFAULT_MODEL=base
-      - BACKEND_WS_URL=ws://whisper:8000/v1/audio/transcriptions
+      - WHISPER_API_URL=http://whisper:8000
     depends_on:
       - whisper
     restart: unless-stopped

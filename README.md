@@ -26,55 +26,75 @@ Transcripción de voz a texto **en tiempo real** usando Whisper, con procesamien
 ## 🧠 Arquitectura
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  NAVEGADOR                                                      │
-│                                                                 │
-│  ┌──────────────┐   AudioWorklet    ┌──────────────────┐       │
-│  │  Micrófono   │ ───── PCM 16kHz ──▶  WebSocket /ws   │       │
-│  └──────────────┘                   └───────┬──────────┘       │
-│                                             │                   │
-│  ┌──────────────┐    JSON (texto)   ┌───────┴──────────┐       │
-│  │  UI React    │ ◀────────────────│  onmessage       │       │
-│  └──────────────┘                   └──────────────────┘       │
-└──────────────────────────────────────┬──────────────────────────┘
-                                       │ WebSocket
-                                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  SERVIDOR NODE.JS (server.js)                   Puerto 3005     │
+│  NAVEGADOR (Chrome, Edge, Firefox)                               │
 │                                                                  │
-│  ┌──────────────────┐        ┌──────────────────────────┐       │
-│  │  Next.js SSR     │        │  WS Proxy (/ws)          │       │
-│  │  (páginas, API)  │        │  cliente ←→ backend      │       │
-│  └──────────────────┘        └───────────┬──────────────┘       │
-└──────────────────────────────────────────┬──────────────────────┘
-                                           │ WebSocket
-                                           ▼
+│  ┌──────────────┐  AudioWorklet   ┌───────────────────┐        │
+│  │  Micrófono   │── PCM 16 kHz ──▶│  WebSocket /ws    │        │
+│  └──────────────┘                 └────────┬──────────┘        │
+│                                            │                    │
+│  ┌──────────────┐   JSON (texto)  ┌────────┴──────────┐        │
+│  │  UI React    │◀───────────────│  onmessage        │        │
+│  └──────────────┘                 └───────────────────┘        │
+└───────────────────────────────────┬──────────────────────────────┘
+          WebSocket (ws / wss)      │
+                                    ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  FASTER-WHISPER SERVER                          Puerto 8000     │
+│  IIS  (reverse proxy — solo en producción)                       │
+│  URL Rewrite + ARR  ·  WebSocket upgrade                        │
+│  Puerto :80 / :443 ─────────rewrite──────▶ localhost:3005        │
+└──────────────────────────────────┬───────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  SERVIDOR NODE.JS  (server.js)                  Puerto 3005     │
 │                                                                  │
-│  ┌────────────────┐    ┌─────────────┐    ┌────────────────┐   │
-│  │  Recibe PCM    │───▶│ faster-     │───▶│ Devuelve JSON  │   │
-│  │  (audio raw)   │    │ whisper     │    │ { text: "..." }│   │
-│  └────────────────┘    └─────────────┘    └────────────────┘   │
+│  ┌──────────────────┐       ┌─────────────────────────────┐    │
+│  │  Next.js SSR     │       │  WS Bridge (/ws)            │    │
+│  │  (páginas, API)  │       │  Recibe PCM → WAV → POST    │    │
+│  └──────────────────┘       │  Devuelve JSON al browser    │    │
+│                             └──────────────┬──────────────┘    │
+│  ┌──────────────────────────┐              │                    │
+│  │  /api/transcribe (REST)  │              │                    │
+│  │  Subida de archivos      │──────────┐   │                    │
+│  └──────────────────────────┘          │   │                    │
+└────────────────────────────────────────┼───┼────────────────────┘
+                              HTTP POST  │   │  HTTP POST
+                                         ▼   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  FASTER-WHISPER SERVER (Docker)                 Puerto 8000     │
+│                                                                  │
+│  POST /v1/audio/transcriptions  (OpenAI-compatible)             │
+│                                                                  │
+│  ┌────────────────┐   ┌──────────────┐   ┌─────────────────┐  │
+│  │  Recibe WAV    │──▶│ faster-      │──▶│ Devuelve JSON   │  │
+│  │  (audio file)  │   │ whisper      │   │ { text: "..." } │  │
+│  └────────────────┘   └──────────────┘   └─────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Flujo de datos
+### Flujo de datos (tiempo real)
 
-1. **Captura de audio** — El navegador accede al micrófono vía `getUserMedia` y procesa el audio con un `AudioWorkletProcessor` (`pcm-processor.js`) que emite buffers PCM float32.
-2. **Downsampling** — Los buffers se remuestrean a **16 kHz** (frecuencia que espera Whisper) y se envían por **WebSocket** a `/ws`.
-3. **Proxy WS** — El servidor Node.js (`server.js`) recibe la conexión WebSocket del navegador y la reenvía de forma transparente al backend Faster-Whisper.
-4. **Transcripción** — Faster-Whisper procesa los fragmentos de audio y devuelve texto transcrito en JSON.
-5. **Renderizado** — El frontend recibe los mensajes JSON y renderiza el texto con timestamps en tiempo real.
+1. **Captura** — El navegador accede al micrófono vía `getUserMedia` y un `AudioWorkletProcessor` emite buffers PCM float32.
+2. **Downsampling** — Los buffers se remuestrean a **16 kHz** y se envían por **WebSocket** a `/ws`.
+3. **Bridge WS→REST** — `server.js` acumula los chunks PCM, cada ~3 s los convierte a WAV y hace `POST` al REST API de Faster-Whisper (`/v1/audio/transcriptions`).
+4. **Transcripción** — Faster-Whisper procesa el WAV y devuelve texto en JSON.
+5. **Renderizado** — El texto vuelve al browser vía WebSocket y se muestra con timestamps.
+
+### Flujo alternativo (subida de archivo)
+
+El endpoint `POST /api/transcribe` permite subir un archivo `.wav`/`.mp3` directamente. Reenvía el archivo a Faster-Whisper y devuelve el texto.
 
 ### Componentes clave
 
 | Archivo | Función |
 |---|---|
-| `server.js` | Servidor custom Node.js: sirve Next.js + proxy WebSocket |
-| `src/app/page.tsx` | UI principal: grabación, transcripción, controles |
+| `server.js` | Servidor Node.js: Next.js SSR + bridge WS→REST a Whisper |
+| `src/app/page.tsx` | UI principal: grabación, controles, transcripción |
+| `src/app/api/transcribe/route.ts` | API REST para transcribir archivos subidos |
 | `public/pcm-processor.js` | AudioWorklet que captura y emite PCM raw |
-| `docker-compose.yml` | Orquestación de todo el stack con Docker |
+| `docker-compose.yml` | Orquestación Docker (Whisper + frontend opcional) |
+| `web.config` | Configuración IIS: reverse proxy + WebSocket |
 
 ---
 
@@ -111,11 +131,11 @@ npm run start        # sirve en el puerto definido en .env
 Crea un archivo `.env` en la raíz:
 
 ```env
-PORT=3005                          # Puerto del servidor Node.js
-NODE_ENV=production                # production | development
-NEXT_PUBLIC_WS_URL=/ws             # Ruta WebSocket (relativa al frontend)
-NEXT_PUBLIC_DEFAULT_MODEL=base     # Modelo inicial: tiny|base|small|medium|large-v3
-BACKEND_WS_URL=ws://localhost:9000 # URL WebSocket del backend Whisper
+PORT=3005                              # Puerto del servidor Node.js
+NODE_ENV=production                    # production | development
+NEXT_PUBLIC_WS_URL=/ws                 # Ruta WebSocket (relativa al dominio)
+NEXT_PUBLIC_DEFAULT_MODEL=base         # Modelo: tiny|base|small|medium|large-v3
+WHISPER_API_URL=http://localhost:8000   # REST API de Faster-Whisper (Docker)
 ```
 
 ---
