@@ -1,5 +1,7 @@
 # 🎤 VoiceToText
 
+> **📖 [README](README.md)** · **🚀 [Despliegue](DEPLOY.md)**
+
 Transcripción de voz a texto **en tiempo real** usando Whisper, con procesamiento 100% local.
 
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)

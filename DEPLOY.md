@@ -1,5 +1,7 @@
 # 🚀 VoiceToText - Guía de Despliegue
 
+> **📖 [README](README.md)** · **🚀 [Despliegue](DEPLOY.md)**
+
 ## Requisitos previos
 
 | Herramienta | Versión mínima |
