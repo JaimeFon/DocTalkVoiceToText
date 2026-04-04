@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "dotenv -- next dev --turbopack -p %PORT%",
+    "dev": "dotenv -- next dev --turbopack",
     "build": "next build",
-    "start": "dotenv -- next start -p %PORT%"
+    "start": "dotenv -- next start"
   },
   "dependencies": {
     "lightningcss-win32-x64-msvc": "^1.32.0",
