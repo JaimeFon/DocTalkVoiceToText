@@ -18,32 +18,65 @@ app.prepare().then(() => {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (req, socket, head) => {
-    if (req.url === "/ws") {
+    const url = req.url.split("?")[0];
+    console.log(`[WS] Upgrade request: ${url}`);
+    if (url === "/ws") {
       wss.handleUpgrade(req, socket, head, (clientWs) => {
+        console.log("[WS] Client upgraded, connecting to backend...");
         const backend = new WebSocket(BACKEND_WS);
+        let backendOpen = false;
+        const buffered = [];
 
         backend.on("open", () => {
-          clientWs.on("message", (data) => {
-            if (backend.readyState === WebSocket.OPEN) backend.send(data);
-          });
-          backend.on("message", (data) => {
-            if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data);
-          });
+          console.log("[WS] Backend connected");
+          backendOpen = true;
+          // Enviar mensajes que llegaron antes de que el backend estuviera listo
+          for (const msg of buffered) {
+            backend.send(msg);
+          }
+          buffered.length = 0;
         });
 
-        clientWs.on("close", () => backend.close());
-        backend.on("close", () => clientWs.close());
+        clientWs.on("message", (data) => {
+          if (backendOpen && backend.readyState === WebSocket.OPEN) {
+            backend.send(data);
+          } else if (!backendOpen) {
+            buffered.push(data);
+          }
+        });
+
+        backend.on("message", (data) => {
+          if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data);
+        });
+
+        clientWs.on("close", (code, reason) => {
+          console.log(`[WS] Client closed: ${code} ${reason}`);
+          if (backend.readyState === WebSocket.OPEN) backend.close();
+          else if (backend.readyState === WebSocket.CONNECTING) backend.terminate();
+        });
+
+        backend.on("close", (code, reason) => {
+          console.log(`[WS] Backend closed: ${code} ${reason}`);
+          if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+        });
 
         backend.on("error", (err) => {
-          console.error("Backend WS error:", err.message);
-          clientWs.close();
+          console.error("[WS] Backend error:", err.message);
+          if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
         });
+
         clientWs.on("error", (err) => {
-          console.error("Client WS error:", err.message);
-          backend.close();
+          console.error("[WS] Client error:", err.message);
+          if (backend.readyState === WebSocket.OPEN) backend.close();
+          else if (backend.readyState === WebSocket.CONNECTING) backend.terminate();
         });
       });
     } else {
+      // Next.js HMR u otros upgrades en dev
+      if (dev) {
+        // Dejar que Next.js maneje otros upgrades
+        return;
+      }
       socket.destroy();
     }
   });
