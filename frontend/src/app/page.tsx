@@ -40,11 +40,24 @@ export default function Home() {
   const streamRef = useRef<MediaStream | null>(null);
   const volumeRafRef = useRef<number>(0);
   const transcriptionEndRef = useRef<HTMLDivElement | null>(null);
+  const recordingRef = useRef(false);
 
   // Auto-scroll al final cuando llega nueva transcripción
   useEffect(() => {
     transcriptionEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcription]);
+
+  // Mantener ref sincronizado con el estado de grabación
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
+
+  // Limpiar recursos al desmontar componente
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, [cleanup]);
 
   const downsample = useCallback(
     (buffer: Float32Array, fromRate: number, toRate: number): Float32Array => {
@@ -102,7 +115,7 @@ export default function Home() {
 
       ws.onerror = () => setStatus("Error de conexión");
       ws.onclose = () => {
-        if (recording) setStatus("Conexión perdida");
+        if (recordingRef.current) setStatus("Conexión perdida");
       };
 
       await new Promise<void>((resolve, reject) => {
@@ -161,7 +174,7 @@ export default function Home() {
       );
       cleanup();
     }
-  }, [downsample, recording, selectedModel, startVolumeMonitor]);
+  }, [downsample, selectedModel, startVolumeMonitor, cleanup]);
 
   const cleanup = useCallback(() => {
     cancelAnimationFrame(volumeRafRef.current);

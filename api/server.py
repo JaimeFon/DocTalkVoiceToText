@@ -48,6 +48,13 @@ def get_model(name: str) -> WhisperModel:
     return _model_cache[name]
 
 
+def _transcribe_sync(model, audio, **kwargs):
+    """Ejecuta transcripción síncronamente (para asyncio.to_thread)."""
+    segments, info = model.transcribe(audio, **kwargs)
+    text_parts = [s.text for s in segments]
+    return text_parts, info
+
+
 # Pre-cargar el modelo por defecto
 get_model("tiny")
 
@@ -57,6 +64,7 @@ async def handler(websocket):
     logger.info("Cliente conectado: %s", websocket.remote_address)
     buffer = np.array([], dtype=np.float32)
     client_model = _current_model_name
+    connected = True
 
     try:
         async for message in websocket:
@@ -68,7 +76,7 @@ async def handler(websocket):
                         new_model = cmd.get("model", "tiny")
                         if new_model in AVAILABLE_MODELS:
                             client_model = new_model
-                            get_model(client_model)
+                            await asyncio.to_thread(get_model, client_model)
                             await websocket.send(json.dumps({
                                 "type": "model_changed",
                                 "model": client_model,
@@ -94,15 +102,10 @@ async def handler(websocket):
                 continue
 
             model = get_model(client_model)
-            segments, info = model.transcribe(
-                buffer,
-                language="es",
-                beam_size=1,           # Más rápido
-                vad_filter=True,       # Filtra silencios
-                without_timestamps=True,
+            text_parts, info = await asyncio.to_thread(
+                _transcribe_sync, model, buffer,
+                language="es", beam_size=1, vad_filter=True, without_timestamps=True,
             )
-
-            text_parts = [segment.text for segment in segments]
             text = " ".join(text_parts).strip()
 
             if text:
@@ -117,18 +120,21 @@ async def handler(websocket):
             buffer = np.array([], dtype=np.float32)
 
     except websockets.exceptions.ConnectionClosed:
+        connected = False
         logger.info("Cliente desconectado: %s", websocket.remote_address)
     except Exception:
+        connected = False
         logger.exception("Error procesando audio")
     finally:
-        # Transcribir audio restante en buffer
-        if len(buffer) > SAMPLE_RATE * 0.3:
+        # Transcribir audio restante solo si la conexión sigue abierta
+        if connected and len(buffer) > SAMPLE_RATE * 0.3:
             try:
                 model = get_model(client_model)
-                segments, info = model.transcribe(
-                    buffer, language="es", beam_size=1, without_timestamps=True
+                text_parts, info = await asyncio.to_thread(
+                    _transcribe_sync, model, buffer,
+                    language="es", beam_size=1, without_timestamps=True,
                 )
-                text = " ".join(s.text for s in segments).strip()
+                text = " ".join(text_parts).strip()
                 if text:
                     await websocket.send(json.dumps({
                         "type": "transcription",
