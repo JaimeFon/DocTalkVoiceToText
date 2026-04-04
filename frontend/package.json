@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "dotenv -- next dev --turbopack -p %PORT%",
     "build": "next build",
-    "start": "next start"
+    "start": "dotenv -- next start -p %PORT%"
   },
   "dependencies": {
     "lightningcss-win32-x64-msvc": "^1.32.0",
@@ -18,6 +18,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "dotenv-cli": "^11.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.0"
   }
