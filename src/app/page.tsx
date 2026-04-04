@@ -17,7 +17,15 @@ const TARGET_SAMPLE_RATE = 16000;
 interface TranscriptionEntry {
   text: string;
   timestamp: string;
+  speaker: string | null;
 }
+
+// Mapa de hablantes: pyannote asigna SPEAKER_00, SPEAKER_01...
+// El primer hablante se asume como Doctor, el segundo como Paciente.
+const SPEAKER_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  SPEAKER_00: { label: "Doctor",   color: "text-blue-400",  bg: "bg-blue-400" },
+  SPEAKER_01: { label: "Paciente", color: "text-green-400", bg: "bg-green-400" },
+};
 
 const MODELS = [
   { id: "tiny", label: "Tiny (75 MB)", quality: "Baja" },
@@ -135,8 +143,21 @@ export default function Home() {
         if (data.type === "transcription" && data.text) {
           setTranscription((prev) => [
             ...prev,
-            { text: data.text, timestamp: formatTime() },
+            { text: data.text, timestamp: formatTime(), speaker: data.speaker || null },
           ]);
+        }
+        if (data.type === "diarization" && data.segments) {
+          // Reemplazar las entradas recientes con versiones que incluyen hablante
+          const diarized: TranscriptionEntry[] = data.segments
+            .filter((s: { text: string }) => s.text.trim())
+            .map((s: { speaker: string | null; text: string }) => ({
+              text: s.text.trim(),
+              timestamp: formatTime(),
+              speaker: s.speaker || null,
+            }));
+          if (diarized.length > 0) {
+            setTranscription((prev) => [...prev, ...diarized]);
+          }
         }
         if (data.type === "model_changed") {
           setModelLoading(false);
@@ -230,7 +251,14 @@ export default function Home() {
 
   // Copiar al portapapeles
   const copyToClipboard = useCallback(async () => {
-    const fullText = transcription.map((e) => `[${e.timestamp}] ${e.text}`).join("\n");
+    const fullText = transcription.map((e) => {
+      const spk = e.speaker && SPEAKER_CONFIG[e.speaker]
+        ? SPEAKER_CONFIG[e.speaker].label
+        : "";
+      return spk
+        ? `[${e.timestamp}] ${spk}: ${e.text}`
+        : `[${e.timestamp}] ${e.text}`;
+    }).join("\n");
     await navigator.clipboard.writeText(fullText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -240,7 +268,7 @@ export default function Home() {
     <div className="min-h-screen p-6 md:p-10 max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold mb-2">🎤 VoiceToText</h1>
       <p className="text-gray-400 mb-6">
-        Transcripción de voz a texto en español • Whisper {selectedModel}
+        Transcripción médica en español • Whisper {selectedModel} • Vocabulario clínico
       </p>
 
       {/* Selector de modelo */}
@@ -336,22 +364,35 @@ export default function Home() {
           </p>
         ) : (
           <div className="space-y-2">
-            {transcription.map((entry, i) => (
-              <div key={i} className="flex gap-3">
-                <span className="text-xs text-gray-500 font-mono mt-1 shrink-0">
-                  {entry.timestamp}
-                </span>
-                <p className="leading-relaxed text-lg">{entry.text}</p>
-              </div>
-            ))}
+            {transcription.map((entry, i) => {
+              const spk = entry.speaker && SPEAKER_CONFIG[entry.speaker]
+                ? SPEAKER_CONFIG[entry.speaker]
+                : null;
+              return (
+                <div key={i} className="flex gap-3">
+                  <span className="text-xs text-gray-500 font-mono mt-1 shrink-0">
+                    {entry.timestamp}
+                  </span>
+                  {spk && (
+                    <span className={`text-xs font-semibold mt-1 shrink-0 flex items-center gap-1 ${spk.color}`}>
+                      <span className={`w-2 h-2 rounded-full ${spk.bg}`} />
+                      {spk.label}
+                    </span>
+                  )}
+                  <p className="leading-relaxed text-lg">{entry.text}</p>
+                </div>
+              );
+            })}
             <div ref={transcriptionEndRef} />
           </div>
         )}
       </div>
 
       {/* Info */}
-      <div className="mt-4 text-xs text-gray-600">
-        Modelo: whisper-{selectedModel} • Idioma: español • Procesamiento local
+      <div className="mt-4 text-xs text-gray-600 flex items-center gap-4">
+        <span>Modelo: whisper-{selectedModel} • Idioma: español • Vocabulario médico</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> Doctor</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400" /> Paciente</span>
       </div>
     </div>
   );

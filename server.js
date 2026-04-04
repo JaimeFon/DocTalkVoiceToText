@@ -6,9 +6,31 @@ const { WebSocketServer } = require("ws");
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
 const whisperUrl = process.env.WHISPER_API_URL || "http://localhost:8000";
+const diarizeUrl = process.env.DIARIZE_API_URL || "";
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
+
+/* ── Prompt médico ───────────────────────────────────────── */
+// Condiciona a Whisper para que reconozca terminología médica española.
+const MEDICAL_PROMPT = [
+  "Consulta médica entre doctor y paciente.",
+  "Diagnóstico, pronóstico, anamnesis, exploración física, auscultación, palpación, percusión.",
+  "Hemograma, bioquímica, hemoglobina, hematocrito, leucocitos, plaquetas, creatinina, transaminasas, colesterol, triglicéridos, glucemia.",
+  "Radiografía, ecografía, resonancia magnética, TAC, tomografía, electrocardiograma, espirometría, endoscopia.",
+  "Hipertensión arterial, diabetes mellitus tipo 2, dislipemia, cardiopatía isquémica, insuficiencia cardíaca.",
+  "Neumonía, bronquitis, EPOC, asma, enfisema, broncoespasmo.",
+  "Gastritis, reflujo gastroesofágico, úlcera péptica, síndrome de intestino irritable, colitis.",
+  "Cefalea, migraña, lumbalgia, cervicalgia, artrosis, artritis, fibromialgia, neuropatía.",
+  "Hipotiroidismo, hipertiroidismo, anemia ferropénica, insuficiencia renal.",
+  "Paracetamol, ibuprofeno, naproxeno, omeprazol, pantoprazol, metformina, insulina.",
+  "Enalapril, losartán, amlodipino, atorvastatina, simvastatina, ácido acetilsalicílico.",
+  "Amoxicilina, azitromicina, ciprofloxacino, dexametasona, prednisona.",
+  "Miligramos, comprimidos, cápsulas, posología, cada 8 horas, cada 12 horas, en ayunas.",
+  "Tensión arterial, presión sistólica, presión diastólica, frecuencia cardíaca, saturación de oxígeno.",
+  "Antecedentes familiares, alergias medicamentosas, intervenciones quirúrgicas, hábitos tóxicos.",
+  "Receta médica, derivación, interconsulta, seguimiento, control, revisión.",
+].join(" ");
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -41,7 +63,7 @@ function pcmToWav(pcmFloat32, sampleRate) {
 }
 
 // Construye body multipart/form-data manualmente (sin dependencias)
-function buildMultipart(wavBuf, model, language) {
+function buildMultipart(wavBuf, model, language, prompt) {
   const boundary = "----WavBoundary" + Date.now().toString(36);
   const parts = [];
 
@@ -55,6 +77,11 @@ function buildMultipart(wavBuf, model, language) {
   parts.push(Buffer.from(
     `\r\n--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${language}`
   ));
+  if (prompt) {
+    parts.push(Buffer.from(
+      `\r\n--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`
+    ));
+  }
   parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
 
   return {
@@ -89,14 +116,20 @@ app.prepare().then(() => {
 
     const SAMPLE_RATE = 16000;
     const CHUNK_SECONDS = 3;
+    const DIARIZE_SECONDS = 15; // ventana más larga para diarización
     const CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE;
+    const DIARIZE_SAMPLES = DIARIZE_SECONDS * SAMPLE_RATE;
 
     let currentModel = process.env.NEXT_PUBLIC_DEFAULT_MODEL || "base";
-    let pcmChunks = [];      // Float32Array[]
+    let pcmChunks = [];      // Float32Array[] — buffer para transcripción rápida
     let bufferSamples = 0;
+    let diarizeChunks = [];  // Float32Array[] — buffer para diarización
+    let diarizeSamples = 0;
     let sending = false;
+    let diarizing = false;
+    const useDiarize = !!diarizeUrl;
 
-    // Envía el buffer acumulado al REST API de Whisper
+    // Envía el buffer acumulado al REST API de Whisper (transcripción rápida)
     async function flushBuffer() {
       if (sending || bufferSamples === 0) return;
       sending = true;
@@ -113,7 +146,7 @@ app.prepare().then(() => {
 
       try {
         const wav = pcmToWav(combined, SAMPLE_RATE);
-        const { body, contentType } = buildMultipart(wav, currentModel, "es");
+        const { body, contentType } = buildMultipart(wav, currentModel, "es", MEDICAL_PROMPT);
 
         const resp = await fetch(`${whisperUrl}/v1/audio/transcriptions`, {
           method: "POST",
@@ -125,7 +158,7 @@ app.prepare().then(() => {
           const data = await resp.json();
           const text = (data.text || "").trim();
           if (text && clientWs.readyState === 1) {
-            clientWs.send(JSON.stringify({ type: "transcription", text }));
+            clientWs.send(JSON.stringify({ type: "transcription", text, speaker: null }));
           }
         } else {
           console.error("[whisper]", resp.status, await resp.text());
@@ -137,8 +170,55 @@ app.prepare().then(() => {
       }
     }
 
+    // Envía ventana larga al servicio de diarización
+    async function flushDiarize() {
+      if (diarizing || diarizeSamples === 0 || !useDiarize) return;
+      diarizing = true;
+
+      const combined = new Float32Array(diarizeSamples);
+      let offset = 0;
+      for (const chunk of diarizeChunks) {
+        combined.set(chunk, offset);
+        offset += chunk.length;
+      }
+      diarizeChunks = [];
+      diarizeSamples = 0;
+
+      try {
+        const wav = pcmToWav(combined, SAMPLE_RATE);
+        const formData = new FormData();
+        formData.append("file", new Blob([wav], { type: "audio/wav" }), "chunk.wav");
+        formData.append("num_speakers", "2");
+        formData.append("language", "es");
+        formData.append("model", currentModel);
+        formData.append("prompt", MEDICAL_PROMPT);
+
+        const resp = await fetch(`${diarizeUrl}/transcribe`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          // data.segments: [{ speaker, start, end, text }]
+          if (data.segments && clientWs.readyState === 1) {
+            clientWs.send(JSON.stringify({ type: "diarization", segments: data.segments }));
+          }
+        } else {
+          console.error("[diarize]", resp.status, await resp.text());
+        }
+      } catch (err) {
+        console.error("[diarize] Error:", err.message);
+      } finally {
+        diarizing = false;
+      }
+    }
+
     // Timer periódico para no esperar solo al llenado del buffer
     const interval = setInterval(() => flushBuffer(), CHUNK_SECONDS * 1000);
+    const diarizeInterval = useDiarize
+      ? setInterval(() => flushDiarize(), DIARIZE_SECONDS * 1000)
+      : null;
 
     clientWs.on("message", (data, isBinary) => {
       if (isBinary) {
@@ -146,8 +226,19 @@ app.prepare().then(() => {
         const f32 = new Float32Array(
           data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
         );
+
+        // Buffer para transcripción rápida
         pcmChunks.push(f32);
         bufferSamples += f32.length;
+
+        // Buffer para diarización (ventana más larga)
+        if (useDiarize) {
+          diarizeChunks.push(f32);
+          diarizeSamples += f32.length;
+          if (diarizeSamples >= DIARIZE_SAMPLES) {
+            flushDiarize();
+          }
+        }
 
         // Si hay suficiente audio, enviar ya
         if (bufferSamples >= CHUNK_SAMPLES) {
@@ -168,12 +259,15 @@ app.prepare().then(() => {
 
     clientWs.on("close", () => {
       clearInterval(interval);
+      if (diarizeInterval) clearInterval(diarizeInterval);
       flushBuffer(); // enviar audio restante
+      if (useDiarize) flushDiarize();
       console.log("[ws] Cliente desconectado");
     });
 
     clientWs.on("error", (err) => {
       clearInterval(interval);
+      if (diarizeInterval) clearInterval(diarizeInterval);
       console.error("[ws] Error cliente:", err.message);
     });
   });

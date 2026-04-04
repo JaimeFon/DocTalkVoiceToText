@@ -1,29 +1,72 @@
-# 🎤 VoiceToText
+# 🎤 DocTalk — VoiceToText
 
 > **📖 [README](README.md)** · **🚀 [Despliegue](DEPLOY.md)**
 
-Transcripción de voz a texto **en tiempo real** usando Whisper, con procesamiento 100% local.
+Plataforma de **transcripción médica en tiempo real** para consultas clínicas.
+Captura la conversación entre doctor y paciente, transcribe con vocabulario médico especializado e identifica quién habla. Procesamiento **100% local**, sin enviar datos a la nube.
 
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED)
 ![Whisper](https://img.shields.io/badge/faster--whisper-1.1-green)
+![pyannote](https://img.shields.io/badge/pyannote-3.1-purple)
+
+---
+
+## 💼 Caso de negocio
+
+### Problema
+
+Los médicos dedican entre un **30% y un 50%** de su tiempo a documentación clínica. Tomar apuntes durante la consulta reduce la atención al paciente, genera errores y agota al profesional.
+
+### Solución
+
+DocTalk transcribe automáticamente la consulta médica mientras ocurre:
+
+| Sin DocTalk | Con DocTalk |
+|---|---|
+| El médico escribe a mano o dicta después | La transcripción ocurre en tiempo real |
+| Pierde contacto visual con el paciente | Mantiene la conversación natural |
+| Puede olvidar detalles del diálogo | Todo queda registrado con timestamps |
+| No sabe quién dijo qué | Identifica Doctor vs Paciente |
+| Términos médicos mal transcritos | Vocabulario clínico optimizado |
+
+### Diferenciadores
+
+- **Privacidad total** — El audio nunca sale del servidor del hospital/consulta. Cumple con regulaciones de protección de datos sanitarios.
+- **Sin costos recurrentes** — No depende de APIs externas de pago (OpenAI, Google, etc.). Una vez desplegado, costo operativo = electricidad.
+- **Vocabulario médico** — Prompt especializado con cientos de términos clínicos: fármacos, diagnósticos, pruebas, posología.
+- **Identificación de hablantes** — Distingue doctor de paciente automáticamente con colores.
+- **Despliegue on-premise** — Funciona en un servidor Windows con IIS, ideal para infraestructura hospitalaria existente.
+
+### Público objetivo
+
+| Segmento | Uso |
+|---|---|
+| Consultorios privados | Transcripción de consultas 1 a 1 |
+| Clínicas y policlínicos | Múltiples consultorios simultáneos |
+| Hospitales | Integración con HIS/HCE existentes |
+| Telemedicina | Transcripción de videoconsultas |
 
 ---
 
 ## ✨ Características
 
 - **Transcripción en tiempo real** — el texto aparece mientras hablas
+- **Vocabulario médico** — optimizado para terminología clínica española
+- **Diarización** — identifica quién habla: 🔵 Doctor / 🟢 Paciente
 - **100% local** — sin enviar audio a la nube, privacidad total
-- **Soporte español** — optimizado para transcripción en español
-- **Selector de modelos** — cambia entre tiny, base, small, medium y large-v3 en caliente
+- **Selector de modelos** — tiny, base, small, medium, large-v3 en caliente
 - **Indicador de volumen** — barra visual de nivel de audio
-- **Timestamps** — cada fragmento transcrito lleva marca de hora
-- **Copiar al portapapeles** — exporta toda la transcripción con un clic
+- **Timestamps** — cada fragmento lleva marca de hora
+- **Copiar al portapapeles** — exporta la transcripción con hablantes identificados
+- **REST API** — endpoint `/api/transcribe` para integrar con otros sistemas
 - **Docker ready** — levanta todo el stack con un solo comando
 
 ---
 
 ## 🧠 Arquitectura
+
+### Diagrama general
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -33,16 +76,17 @@ Transcripción de voz a texto **en tiempo real** usando Whisper, con procesamien
 │  │  Micrófono   │── PCM 16 kHz ──▶│  WebSocket /ws    │        │
 │  └──────────────┘                 └────────┬──────────┘        │
 │                                            │                    │
-│  ┌──────────────┐   JSON (texto)  ┌────────┴──────────┐        │
-│  │  UI React    │◀───────────────│  onmessage        │        │
-│  └──────────────┘                 └───────────────────┘        │
+│  ┌──────────────┐   JSON (texto   ┌────────┴──────────┐        │
+│  │  UI React    │◀── + hablante)─│  onmessage        │        │
+│  │  🔵 Doctor   │                 └───────────────────┘        │
+│  │  🟢 Paciente │                                              │
+│  └──────────────┘                                              │
 └───────────────────────────────────┬──────────────────────────────┘
           WebSocket (ws / wss)      │
                                     ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  IIS  (reverse proxy — solo en producción)                       │
-│  URL Rewrite + ARR  ·  WebSocket upgrade                        │
-│  Puerto :80 / :443 ─────────rewrite──────▶ localhost:3005        │
+│  IIS  (reverse proxy — producción)          Puerto :80 / :443   │
+│  URL Rewrite + ARR + WebSocket                                   │
 └──────────────────────────────────┬───────────────────────────────┘
                                    │
                                    ▼
@@ -51,95 +95,208 @@ Transcripción de voz a texto **en tiempo real** usando Whisper, con procesamien
 │                                                                  │
 │  ┌──────────────────┐       ┌─────────────────────────────┐    │
 │  │  Next.js SSR     │       │  WS Bridge (/ws)            │    │
-│  │  (páginas, API)  │       │  Recibe PCM → WAV → POST    │    │
-│  └──────────────────┘       │  Devuelve JSON al browser    │    │
-│                             └──────────────┬──────────────┘    │
-│  ┌──────────────────────────┐              │                    │
-│  │  /api/transcribe (REST)  │              │                    │
-│  │  Subida de archivos      │──────────┐   │                    │
-│  └──────────────────────────┘          │   │                    │
-└────────────────────────────────────────┼───┼────────────────────┘
-                              HTTP POST  │   │  HTTP POST
-                                         ▼   ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  FASTER-WHISPER SERVER (Docker)                 Puerto 8000     │
-│                                                                  │
-│  POST /v1/audio/transcriptions  (OpenAI-compatible)             │
-│                                                                  │
-│  ┌────────────────┐   ┌──────────────┐   ┌─────────────────┐  │
-│  │  Recibe WAV    │──▶│ faster-      │──▶│ Devuelve JSON   │  │
-│  │  (audio file)  │   │ whisper      │   │ { text: "..." } │  │
-│  └────────────────┘   └──────────────┘   └─────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
+│  │  (páginas, API)  │       │  PCM → WAV → POST ~3s       │    │
+│  └──────────────────┘       │  + Prompt médico             │    │
+│                             └───────┬────────┬────────────┘    │
+│  ┌──────────────────────────┐       │        │                  │
+│  │  /api/transcribe (REST)  │───┐   │        │                  │
+│  └──────────────────────────┘   │   │        │                  │
+└─────────────────────────────────┼───┼────────┼──────────────────┘
+                                  │   │        │
+                      HTTP POST   │   │        │ HTTP POST
+                                  ▼   ▼        ▼
+                ┌─────────────────────┐  ┌──────────────────────┐
+                │  FASTER-WHISPER     │  │  DIARIZE SERVER      │
+                │  (Docker :8000)     │  │  (Docker :8001)      │
+                │                     │  │                      │
+                │  Transcripción      │  │  WhisperX + pyannote │
+                │  rápida ~3s chunks  │  │  Ventana ~15s        │
+                │  + vocabulario med. │  │  Doctor / Paciente   │
+                └─────────────────────┘  └──────────────────────┘
 ```
 
-### Flujo de datos (tiempo real)
+### Diseño: tres capas independientes
 
-1. **Captura** — El navegador accede al micrófono vía `getUserMedia` y un `AudioWorkletProcessor` emite buffers PCM float32.
-2. **Downsampling** — Los buffers se remuestrean a **16 kHz** y se envían por **WebSocket** a `/ws`.
-3. **Bridge WS→REST** — `server.js` acumula los chunks PCM, cada ~3 s los convierte a WAV y hace `POST` al REST API de Faster-Whisper (`/v1/audio/transcriptions`).
-4. **Transcripción** — Faster-Whisper procesa el WAV y devuelve texto en JSON.
-5. **Renderizado** — El texto vuelve al browser vía WebSocket y se muestra con timestamps.
+| Capa | Tecnología | Función | Escala |
+|---|---|---|---|
+| **Presentación** | Next.js 15 + React 19 + Tailwind 4 | UI, captura de audio, WebSocket cliente | Ligero, < 105 KB JS |
+| **Orquestación** | Node.js + server.js custom | Sirve SSR, bridge WS→REST, prompt médico | 1 proceso, ~50 MB RAM |
+| **IA** | Faster-Whisper + WhisperX + pyannote | Transcripción + diarización | Docker, 1-10 GB RAM según modelo |
 
-### Flujo alternativo (subida de archivo)
+Cada capa se puede **escalar, reemplazar o desactivar** independientemente. Si no necesitas diarización, no la levantas. Si quieres cambiar el frontend, el backend no se toca.
 
-El endpoint `POST /api/transcribe` permite subir un archivo `.wav`/`.mp3` directamente. Reenvía el archivo a Faster-Whisper y devuelve el texto.
+---
 
-### Componentes clave
+## 🔬 Lógica de funcionamiento
 
-| Archivo | Función |
-|---|---|
-| `server.js` | Servidor Node.js: Next.js SSR + bridge WS→REST a Whisper |
-| `src/app/page.tsx` | UI principal: grabación, controles, transcripción |
-| `src/app/api/transcribe/route.ts` | API REST para transcribir archivos subidos |
-| `public/pcm-processor.js` | AudioWorklet que captura y emite PCM raw |
-| `docker-compose.yml` | Orquestación Docker (Whisper + frontend opcional) |
-| `web.config` | Configuración IIS: reverse proxy + WebSocket |
+### 1. Captura de audio (navegador)
+
+```
+Micrófono → getUserMedia (mono, 16kHz ideal)
+         → AudioContext + AudioWorkletProcessor
+         → Buffers Float32 de 4096 muestras
+         → Downsampling a 16 kHz
+         → Envío binario por WebSocket
+```
+
+El `AudioWorkletProcessor` ([pcm-processor.js](public/pcm-processor.js)) corre en un hilo separado del navegador, garantizando captura sin glitches aunque la UI esté ocupada.
+
+### 2. Transcripción rápida (~3 segundos)
+
+```
+server.js recibe chunks PCM por WebSocket
+    ↓
+Acumula en buffer hasta ~3s de audio (48,000 muestras)
+    ↓
+Convierte Float32 → WAV 16-bit mono (header + data)
+    ↓
+POST multipart/form-data → Faster-Whisper /v1/audio/transcriptions
+    + model: base (configurable)
+    + language: es
+    + prompt: "Consulta médica... hipertensión... paracetamol..."
+    ↓
+Respuesta JSON { text: "el paciente refiere cefalea..." }
+    ↓
+Envía al navegador por WebSocket → renderiza con timestamp
+```
+
+El **prompt médico** es clave: contiene ~100 términos clínicos que condicionan al modelo. Whisper usa este prompt como contexto para desambiguar fonemas similares (ej: "enalapril" vs "una la pril").
+
+### 3. Diarización (~15 segundos, opcional)
+
+```
+server.js acumula un buffer más largo (~15s)
+    ↓
+Convierte a WAV → POST → Diarize Server (:8001)
+    ↓
+WhisperX: transcribir → alinear por palabra → diarizar
+    ↓
+pyannote asigna SPEAKER_00 / SPEAKER_01
+    (min_speakers=2, max_speakers=2 → consulta médica)
+    ↓
+Respuesta: [{ speaker: "SPEAKER_00", text: "¿Cómo se siente?" }]
+    ↓
+Frontend: SPEAKER_00 = 🔵 Doctor, SPEAKER_01 = 🟢 Paciente
+```
+
+La diarización necesita más audio para distinguir voces (mínimo 10-15s), por eso opera en una ventana más larga que la transcripción rápida. Ambos procesos corren en **paralelo**: ves texto rápido y luego se actualizan los hablantes.
+
+### 4. API REST (para integraciones)
+
+```
+POST /api/transcribe
+    Content-Type: multipart/form-data
+    Body: file=audio.wav, model=base, language=es
+    ↓
+Reenvía a Faster-Whisper con prompt médico
+    ↓
+Respuesta: { text: "..." }
+```
+
+Permite integrar con HIS, HCE o cualquier sistema que envíe archivos de audio.
+
+---
+
+## 📁 Estructura del proyecto
+
+```
+DocTalkVoiceToText/
+├── server.js                    # Servidor Node.js: SSR + WS bridge + prompt médico
+├── src/
+│   └── app/
+│       ├── page.tsx             # UI: grabación, transcripción, diarización
+│       ├── layout.tsx           # Layout HTML + metadata
+│       ├── globals.css          # Estilos base (Tailwind)
+│       └── api/
+│           └── transcribe/
+│               └── route.ts     # REST API: subida de archivos
+├── public/
+│   ├── pcm-processor.js        # AudioWorklet: captura PCM
+│   └── icon.svg                # Favicon
+├── diarize-server/              # Microservicio Python
+│   ├── main.py                  # FastAPI: WhisperX + pyannote
+│   ├── Dockerfile               # Imagen Docker
+│   └── requirements.txt         # Dependencias Python
+├── docker-compose.yml           # Orquestación: whisper + diarize + frontend
+├── Dockerfile                   # Build del frontend Next.js
+├── web.config                   # IIS: reverse proxy + WebSocket
+├── .env                         # Variables de entorno (no se sube a Git)
+├── .env.example                 # Plantilla documentada de variables
+├── package.json                 # Dependencias Node.js
+└── DEPLOY.md                    # Guía completa de despliegue
+```
 
 ---
 
 ## 🚀 Inicio rápido
 
-### Con Docker (recomendado)
+### Opción 1: Solo transcripción médica (sin diarización)
 
-```bash
-docker compose up -d
-```
+```powershell
+# 1. Levantar Whisper
+docker compose up whisper -d
 
-Abre [http://localhost:3005](http://localhost:3005) — listo para transcribir.
-
-### Sin Docker
-
-**Requisitos:** Node.js 18+, un servidor Faster-Whisper corriendo.
-
-```bash
+# 2. Frontend
 npm install
-npm run dev          # desarrollo (Turbopack)
-```
-
-Para producción:
-
-```bash
 npm run build
-npm run start        # sirve en el puerto definido en .env
+npm run start
 ```
+
+### Opción 2: Con diarización doctor/paciente
+
+```powershell
+# 1. Configurar token HuggingFace en .env
+#    HF_TOKEN=hf_xxxxx
+
+# 2. Levantar ambos backends
+docker compose up whisper diarize -d
+
+# 3. Frontend
+npm install
+npm run build
+npm run start
+```
+
+Abre **http://localhost:3005** — listo.
 
 ---
 
 ## ⚙️ Variables de entorno
 
-Crea un archivo `.env` en la raíz:
+Copia `.env.example` → `.env` y ajusta:
 
 ```env
-PORT=3005                              # Puerto del servidor Node.js
-NODE_ENV=production                    # production | development
-NEXT_PUBLIC_WS_URL=/ws                 # Ruta WebSocket (relativa al dominio)
-NEXT_PUBLIC_DEFAULT_MODEL=base         # Modelo: tiny|base|small|medium|large-v3
-WHISPER_API_URL=http://localhost:8000   # REST API de Faster-Whisper (Docker)
+PORT=3005                                # Puerto del servidor Node.js
+NODE_ENV=production                      # production | development
+NEXT_PUBLIC_WS_URL=/ws                   # Ruta WebSocket
+NEXT_PUBLIC_DEFAULT_MODEL=base           # Modelo Whisper por defecto
+WHISPER_API_URL=http://localhost:8000     # REST API de Faster-Whisper
+DIARIZE_API_URL=http://localhost:8001    # Microservicio de diarización (opcional)
+HF_TOKEN=                                # Token HuggingFace (para diarización)
 ```
+
+Ver [.env.example](.env.example) para documentación detallada de cada variable.
+
+---
+
+## 🩺 Vocabulario médico incluido
+
+El prompt médico cubre:
+
+| Categoría | Ejemplos |
+|---|---|
+| **Diagnósticos** | Hipertensión arterial, diabetes mellitus, EPOC, cardiopatía isquémica |
+| **Fármacos** | Paracetamol, omeprazol, metformina, enalapril, atorvastatina |
+| **Antibióticos** | Amoxicilina, azitromicina, ciprofloxacino |
+| **Pruebas** | Hemograma, TAC, electrocardiograma, espirometría, ecografía |
+| **Signos vitales** | Tensión arterial, saturación de oxígeno, frecuencia cardíaca |
+| **Posología** | Miligramos, comprimidos, cada 8 horas, en ayunas |
+| **Procedimientos** | Anamnesis, auscultación, palpación, exploración física |
+| **Antecedentes** | Alergias medicamentosas, intervenciones quirúrgicas, hábitos tóxicos |
 
 ---
 
 ## 📚 Documentación
 
-- **[DEPLOY.md](DEPLOY.md)** — Guía completa de despliegue (Docker, producción, GPU)
+- **[DEPLOY.md](DEPLOY.md)** — Guía completa de despliegue (Windows + IIS + Docker, GPU, PM2, troubleshooting)
+- **[.env.example](.env.example)** — Todas las variables de entorno documentadas

@@ -1,6 +1,6 @@
 services:
 
-  # ── Faster-Whisper Server (backend de transcripción) ───
+  # ── Faster-Whisper Server (transcripción rápida) ───────
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu
     # Para GPU NVIDIA, usar:
@@ -21,10 +21,27 @@ services:
       - WHISPER__INFERENCE_DEVICE=cpu
     restart: unless-stopped
 
+  # ── Diarización (WhisperX + pyannote) ──────────────────
+  # Identifica quién habla (doctor / paciente).
+  # Requiere HF_TOKEN de HuggingFace (gratuito).
+  # Para levantar: docker compose up whisper diarize -d
+  diarize:
+    build: ./diarize-server
+    ports:
+      - "8001:8001"
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+      - diarize-models:/root/.cache/torch
+    environment:
+      - DEVICE=cpu                       # "cuda" para GPU
+      - WHISPER_MODEL=base
+      - NUM_SPEAKERS=2                   # Consulta médica: doctor + paciente
+      - HF_TOKEN=${HF_TOKEN:-}           # Token de HuggingFace (requerido)
+    restart: unless-stopped
+
   # ── (Opcional) Frontend en Docker ──────────────────────
-  # En Windows + IIS se recomienda correr el frontend con Node.js nativo
-  # y usar solo el servicio "whisper" de este compose.
-  # Para levantar solo Whisper: docker compose up whisper -d
+  # En Windows + IIS se recomienda correr el frontend con Node.js nativo.
+  # Para levantar solo los backends: docker compose up whisper diarize -d
   frontend:
     build: .
     ports:
@@ -35,9 +52,12 @@ services:
       - NEXT_PUBLIC_WS_URL=/ws
       - NEXT_PUBLIC_DEFAULT_MODEL=base
       - WHISPER_API_URL=http://whisper:8000
+      - DIARIZE_API_URL=http://diarize:8001
     depends_on:
       - whisper
+      - diarize
     restart: unless-stopped
 
 volumes:
   whisper-models:
+  diarize-models:
