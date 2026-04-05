@@ -147,7 +147,7 @@ export default function Home() {
           ]);
         }
         if (data.type === "diarization" && data.segments) {
-          // Reemplazar las entradas recientes con versiones que incluyen hablante
+          // Diarización reemplaza las últimas N entradas sin speaker
           const diarized: TranscriptionEntry[] = data.segments
             .filter((s: { text: string }) => s.text.trim())
             .map((s: { speaker: string | null; text: string }) => ({
@@ -156,7 +156,14 @@ export default function Home() {
               speaker: s.speaker || null,
             }));
           if (diarized.length > 0) {
-            setTranscription((prev) => [...prev, ...diarized]);
+            setTranscription((prev) => {
+              // Quitar últimas entradas sin speaker que fueron reemplazadas por diarización
+              const withSpeaker = prev.filter((e) => e.speaker !== null);
+              const withoutSpeaker = prev.filter((e) => e.speaker === null);
+              // Mantener solo entradas sin speaker que son más recientes que la diarización
+              const recentUnspeakered = withoutSpeaker.slice(diarized.length);
+              return [...withSpeaker, ...diarized, ...recentUnspeakered];
+            });
           }
         }
         if (data.type === "model_changed") {

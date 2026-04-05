@@ -90,6 +90,25 @@ function buildMultipart(wavBuf, model, language, prompt) {
   };
 }
 
+/* ── Post-procesado de puntuación ────────────────────────── */
+
+// Capitaliza primera letra, añade punto final si falta, limpia espacios repetidos.
+function addPunctuation(text) {
+  if (!text) return text;
+  let t = text.trim();
+  // Limpiar espacios múltiples
+  t = t.replace(/\s{2,}/g, " ");
+  // Capitalizar primera letra
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  // Capitalizar después de . ! ?
+  t = t.replace(/([.!?])\s+([a-záéíóúñ])/gi, (_, p, c) => `${p} ${c.toUpperCase()}`);
+  // Añadir punto final si no termina en signo de puntuación
+  if (!/[.!?…]$/.test(t)) {
+    t += ".";
+  }
+  return t;
+}
+
 /* ── Servidor ────────────────────────────────────────────── */
 
 app.prepare().then(() => {
@@ -116,7 +135,8 @@ app.prepare().then(() => {
 
     const SAMPLE_RATE = 16000;
     const CHUNK_SECONDS = 3;
-    const DIARIZE_SECONDS = 30; // ventana más larga para mejor detección de hablantes
+    const DIARIZE_SECONDS = 30; // ventana para diarización
+    const DIARIZE_OVERLAP = 0.5; // 50% overlap entre ventanas
     const CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE;
     const DIARIZE_SAMPLES = DIARIZE_SECONDS * SAMPLE_RATE;
 
@@ -125,9 +145,20 @@ app.prepare().then(() => {
     let bufferSamples = 0;
     let diarizeChunks = [];  // Float32Array[] — buffer para diarización
     let diarizeSamples = 0;
+    let prevDiarizeChunks = []; // Float32Array[] — overlap de la ventana anterior
+    let prevDiarizeSamples = 0;
     let sending = false;
     let diarizing = false;
     const useDiarize = !!diarizeUrl;
+
+    // Detecta si el audio tiene contenido relevante (no silencio)
+    function hasVoice(pcmFloat32, threshold = 0.01) {
+      let sum = 0;
+      for (let i = 0; i < pcmFloat32.length; i++) {
+        sum += pcmFloat32[i] * pcmFloat32[i];
+      }
+      return Math.sqrt(sum / pcmFloat32.length) > threshold;
+    }
 
     // Envía el buffer acumulado al REST API de Whisper (transcripción rápida)
     async function flushBuffer() {
@@ -144,6 +175,12 @@ app.prepare().then(() => {
       pcmChunks = [];
       bufferSamples = 0;
 
+      // Filtrar silencio para evitar alucinaciones de Whisper
+      if (!hasVoice(combined)) {
+        sending = false;
+        return;
+      }
+
       try {
         const wav = pcmToWav(combined, SAMPLE_RATE);
         const { body, contentType } = buildMultipart(wav, currentModel, "es", MEDICAL_PROMPT);
@@ -157,8 +194,9 @@ app.prepare().then(() => {
         if (resp.ok) {
           const data = await resp.json();
           const text = (data.text || "").trim();
-          if (text && clientWs.readyState === 1) {
-            clientWs.send(JSON.stringify({ type: "transcription", text, speaker: null }));
+          // Filtrar respuestas vacías o repetitivas de Whisper
+          if (text && text.length > 1 && clientWs.readyState === 1) {
+            clientWs.send(JSON.stringify({ type: "transcription", text: addPunctuation(text), speaker: null }));
           }
         } else {
           console.error("[whisper]", resp.status, await resp.text());
@@ -170,19 +208,37 @@ app.prepare().then(() => {
       }
     }
 
-    // Envía ventana larga al servicio de diarización
+    // Envía ventana larga al servicio de diarización (con overlap 50%)
     async function flushDiarize() {
       if (diarizing || diarizeSamples === 0 || !useDiarize) return;
       diarizing = true;
 
-      const combined = new Float32Array(diarizeSamples);
+      // Construir ventana con overlap: audio anterior + audio actual
+      const overlapSamples = prevDiarizeSamples + diarizeSamples;
+      const combined = new Float32Array(overlapSamples);
       let offset = 0;
+      for (const chunk of prevDiarizeChunks) {
+        combined.set(chunk, offset);
+        offset += chunk.length;
+      }
       for (const chunk of diarizeChunks) {
         combined.set(chunk, offset);
         offset += chunk.length;
       }
+
+      // Guardar 50% final como overlap para la próxima ventana
+      const halfSamples = Math.floor(diarizeSamples * DIARIZE_OVERLAP);
+      const halfIdx = diarizeChunks.length - Math.ceil(diarizeChunks.length * DIARIZE_OVERLAP);
+      prevDiarizeChunks = diarizeChunks.slice(Math.max(0, halfIdx));
+      prevDiarizeSamples = prevDiarizeChunks.reduce((acc, c) => acc + c.length, 0);
       diarizeChunks = [];
       diarizeSamples = 0;
+
+      // Filtrar silencio
+      if (!hasVoice(combined)) {
+        diarizing = false;
+        return;
+      }
 
       try {
         const wav = pcmToWav(combined, SAMPLE_RATE);
@@ -190,8 +246,6 @@ app.prepare().then(() => {
         formData.append("file", new Blob([wav], { type: "audio/wav" }), "chunk.wav");
         formData.append("num_speakers", "2");
         formData.append("language", "es");
-        formData.append("model", currentModel);
-        formData.append("prompt", MEDICAL_PROMPT);
 
         const resp = await fetch(`${diarizeUrl}/transcribe`, {
           method: "POST",
@@ -202,7 +256,11 @@ app.prepare().then(() => {
           const data = await resp.json();
           // data.segments: [{ speaker, start, end, text }]
           if (data.segments && clientWs.readyState === 1) {
-            clientWs.send(JSON.stringify({ type: "diarization", segments: data.segments }));
+            const segments = data.segments.map(s => ({
+              ...s,
+              text: addPunctuation(s.text),
+            }));
+            clientWs.send(JSON.stringify({ type: "diarization", segments }));
           }
         } else {
           console.error("[diarize]", resp.status, await resp.text());
