@@ -116,7 +116,7 @@ app.prepare().then(() => {
 
     const SAMPLE_RATE = 16000;
     const CHUNK_SECONDS = 3;
-    const DIARIZE_SECONDS = 15; // ventana más larga para diarización
+    const DIARIZE_SECONDS = 30; // ventana más larga para mejor detección de hablantes
     const CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE;
     const DIARIZE_SAMPLES = DIARIZE_SECONDS * SAMPLE_RATE;
 
