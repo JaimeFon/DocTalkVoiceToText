@@ -99,7 +99,6 @@ async def transcribe(
             audio,
             batch_size=8 if DEVICE == "cuda" else 4,
             language=language,
-            initial_prompt=prompt or None,
         )
 
         # 3. Alinear palabras (necesario para asignar hablantes)

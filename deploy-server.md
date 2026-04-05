@@ -139,15 +139,68 @@ Abrir **http://localhost:3005** en el navegador.
 
 ## Paso 7 — Configurar IIS como reverse proxy
 
-### 7.1 Instalar módulos de IIS
+### 7.1 Instalar URL Rewrite
 
-1. **URL Rewrite** — https://www.iis.net/downloads/microsoft/url-rewrite
-2. **Application Request Routing (ARR)** — https://www.iis.net/downloads/microsoft/application-request-routing
-3. **WebSocket Protocol** — activar en:
-   - Panel de control → Programas → Activar o desactivar características de Windows
-   - → Internet Information Services → Servicios World Wide Web → Características de desarrollo de aplicaciones → **Protocolo WebSocket** ✅
+Descargar e instalar desde: https://www.iis.net/downloads/microsoft/url-rewrite
 
-### 7.2 Habilitar ARR Proxy
+O por PowerShell (como Administrador):
+
+```powershell
+# Descargar URL Rewrite
+Invoke-WebRequest -Uri "https://download.microsoft.com/download/1/2/8/128E2E22-C1B9-44A4-BE2A-5859ED1D4592/rewrite_amd64_en-US.msi" -OutFile "$env:TEMP\urlrewrite.msi"
+
+# Instalar silenciosamente
+Start-Process msiexec.exe -ArgumentList "/i $env:TEMP\urlrewrite.msi /quiet /norestart" -Wait
+
+# Verificar instalación
+Get-WebGlobalModule | Where-Object { $_.Name -like "*Rewrite*" }
+```
+
+### 7.2 Instalar Application Request Routing (ARR)
+
+Descargar e instalar desde: https://www.iis.net/downloads/microsoft/application-request-routing
+
+O por PowerShell (como Administrador):
+
+```powershell
+# Descargar ARR
+Invoke-WebRequest -Uri "https://download.microsoft.com/download/E/9/8/E9849D6A-020E-47E4-9FD0-A023E99B54EB/requestRouter_amd64.msi" -OutFile "$env:TEMP\arr.msi"
+
+# Instalar silenciosamente
+Start-Process msiexec.exe -ArgumentList "/i $env:TEMP\arr.msi /quiet /norestart" -Wait
+
+# Verificar instalación
+Get-WebGlobalModule | Where-Object { $_.Name -like "*Routing*" -or $_.Name -like "*ARR*" }
+```
+
+### 7.3 Instalar WebSocket Protocol
+
+**Esto es obligatorio** — sin WebSocket Protocol, IIS devuelve error 500.
+
+```powershell
+# Instalar WebSocket Protocol (como Administrador)
+Install-WindowsFeature Web-WebSockets
+
+# Verificar (debe decir "Installed")
+Get-WindowsFeature Web-WebSockets
+
+# Reiniciar IIS
+iisreset
+```
+
+### 7.4 Habilitar ARR Proxy
+
+**Opción A — Por PowerShell (recomendado):**
+
+```powershell
+# Habilitar proxy en ARR
+Set-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.webServer/proxy" -name "enabled" -value "true"
+
+# Verificar (debe decir "True")
+(Get-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.webServer/proxy" -name "enabled").Value
+```
+
+**Opción B — Por IIS Manager (gráfico):**
 
 1. Abrir **IIS Manager**
 2. Click en el **nombre del servidor** (raíz)
@@ -156,7 +209,25 @@ Abrir **http://localhost:3005** en el navegador.
 5. Marcar **✅ Enable proxy**
 6. Click en **Apply**
 
-### 7.3 Crear el sitio IIS
+### 7.5 Verificar que todo está instalado
+
+```powershell
+Write-Host "=== URL Rewrite ===" -ForegroundColor Green
+Get-WebGlobalModule | Where-Object { $_.Name -like "*Rewrite*" }
+
+Write-Host "=== ARR ===" -ForegroundColor Green
+Get-WebGlobalModule | Where-Object { $_.Name -like "*Routing*" -or $_.Name -like "*ARR*" }
+
+Write-Host "=== ARR Proxy habilitado ===" -ForegroundColor Green
+(Get-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.webServer/proxy" -name "enabled").Value
+
+Write-Host "=== WebSocket Protocol ===" -ForegroundColor Green
+Get-WindowsFeature Web-WebSockets
+```
+
+Los 4 deben mostrar resultados positivos antes de continuar.
+
+### 7.6 Crear el sitio IIS
 
 1. En IIS Manager → click derecho en **Sites** → **Add Website**
 2. Configurar:
@@ -166,7 +237,7 @@ Abrir **http://localhost:3005** en el navegador.
    - **Host name:** tu dominio o dejar vacío para IP directa
 3. Click **OK**
 
-### 7.4 web.config
+### 7.7 web.config
 
 El archivo `web.config` ya está en el proyecto. IIS lo lee automáticamente si la carpeta física apunta al proyecto.
 
@@ -176,7 +247,7 @@ Si la carpeta del sitio IIS es distinta, copia el web.config:
 Copy-Item C:\Users\alejandro\Desktop\DocTalkVoiceToText\web.config C:\inetpub\DocTalk\web.config
 ```
 
-### 7.5 Verificar
+### 7.8 Verificar
 
 Abrir en el navegador: `http://tu-servidor` — debería mostrar la UI de DocTalk.
 
