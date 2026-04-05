@@ -111,7 +111,7 @@ async def transcribe(
         if diarize_pipeline is not None:
             diarize_segments = diarize_pipeline(
                 audio,
-                min_speakers=num_speakers,
+                min_speakers=1,
                 max_speakers=num_speakers,
             )
             result = whisperx.assign_word_speakers(diarize_segments, result)
