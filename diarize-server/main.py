@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 import torch
 import whisperx
+from whisperx.diarize import DiarizationPipeline
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -45,8 +46,8 @@ async def lifespan(app: FastAPI):
 
     if HF_TOKEN:
         print("[init] Cargando pipeline de diarización (pyannote)...")
-        diarize_pipeline = whisperx.DiarizationPipeline(
-            use_auth_token=HF_TOKEN, device=DEVICE
+        diarize_pipeline = DiarizationPipeline(
+            token=HF_TOKEN, device=DEVICE
         )
     else:
         print("[init] AVISO: Sin HF_TOKEN → diarización deshabilitada.")
