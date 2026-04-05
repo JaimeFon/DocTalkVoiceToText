@@ -165,7 +165,7 @@ Para configurar el modelo y dispositivo, usa variables de entorno:
 
 ```powershell
 # PowerShell — modelo medium con CPU (int8 para ahorrar RAM)
-$env:WHISPER__MODEL = "Systran/faster-whisper-medium"
+$env:WHISPER__MODEL = "Systran/faster-whisper-small"
 $env:WHISPER__INFERENCE_DEVICE = "cpu"
 $env:WHISPER__COMPUTE_TYPE = "int8"
 
@@ -224,7 +224,7 @@ Para que Whisper y la diarización no dependan de una terminal abierta, usa **NS
 nssm install WhisperServer "C:\ruta\whisper-env\Scripts\faster-whisper-server.exe"
 nssm set WhisperServer AppParameters "--host 0.0.0.0 --port 8000"
 nssm set WhisperServer AppEnvironmentExtra ^
-    "WHISPER__MODEL=Systran/faster-whisper-medium" ^
+    "WHISPER__MODEL=Systran/faster-whisper-small" ^
     "WHISPER__INFERENCE_DEVICE=cpu" ^
     "WHISPER__COMPUTE_TYPE=int8"
 nssm start WhisperServer

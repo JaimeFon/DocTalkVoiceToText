@@ -96,7 +96,7 @@ mkdir C:\Users\alejandro\Desktop\logs
 ```powershell
 cd C:\Users\alejandro\Desktop
 .\whisper-env\Scripts\Activate.ps1
-$env:WHISPER__MODEL = "Systran/faster-whisper-medium"
+$env:WHISPER__MODEL = "Systran/faster-whisper-small"
 $env:WHISPER__INFERENCE_DEVICE = "cpu"
 $env:WHISPER__COMPUTE_TYPE = "int8"
 faster-whisper-server --host 0.0.0.0 --port 8000
@@ -268,7 +268,7 @@ choco install nssm -y
 ```powershell
 nssm install WhisperServer "C:\Users\alejandro\Desktop\whisper-env\Scripts\faster-whisper-server.exe"
 nssm set WhisperServer AppParameters "--host 0.0.0.0 --port 8000"
-nssm set WhisperServer AppEnvironmentExtra "WHISPER__MODEL=Systran/faster-whisper-medium" "WHISPER__INFERENCE_DEVICE=cpu" "WHISPER__COMPUTE_TYPE=int8"
+nssm set WhisperServer AppEnvironmentExtra "WHISPER__MODEL=Systran/faster-whisper-small" "WHISPER__INFERENCE_DEVICE=cpu" "WHISPER__COMPUTE_TYPE=int8"
 nssm set WhisperServer AppStdout "C:\Users\alejandro\Desktop\logs\whisper.log"
 nssm set WhisperServer AppStderr "C:\Users\alejandro\Desktop\logs\whisper-error.log"
 nssm start WhisperServer

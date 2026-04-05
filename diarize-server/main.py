@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 # ── Configuración ────────────────────────────────────────────
 DEVICE = os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
-DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "medium")
+DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "small")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
 

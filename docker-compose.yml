@@ -17,7 +17,7 @@ services:
     volumes:
       - whisper-models:/root/.cache/huggingface
     environment:
-      - WHISPER__MODEL=Systran/faster-whisper-medium
+      - WHISPER__MODEL=Systran/faster-whisper-small
       - WHISPER__INFERENCE_DEVICE=cpu
       - WHISPER__COMPUTE_TYPE=int8
     deploy:
@@ -40,7 +40,7 @@ services:
       - diarize-models:/root/.cache/torch
     environment:
       - DEVICE=cpu                       # "cuda" para GPU
-      - WHISPER_MODEL=base
+      - WHISPER_MODEL=small
       - NUM_SPEAKERS=2                   # Consulta médica: doctor + paciente
       - HF_TOKEN=${HF_TOKEN:-}           # Token de HuggingFace (requerido)
     restart: unless-stopped
