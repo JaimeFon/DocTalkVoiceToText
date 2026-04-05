@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     if HF_TOKEN:
         print("[init] Cargando pipeline de diarización (pyannote)...")
         diarize_pipeline = DiarizationPipeline(
+            model_name="pyannote/speaker-diarization-3.1",
             token=HF_TOKEN, device=DEVICE
         )
     else:
