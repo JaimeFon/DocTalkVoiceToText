@@ -22,6 +22,21 @@ DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "medium")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
 
+# Prompt médico para condicionar vocabulario de Whisper
+MEDICAL_PROMPT = (
+    "Consulta médica entre doctor y paciente. "
+    "Diagnóstico, pronóstico, anamnesis, exploración física, auscultación, palpación. "
+    "Hemograma, bioquímica, hemoglobina, hematocrito, leucocitos, plaquetas, creatinina, transaminasas, colesterol, triglicéridos, glucemia. "
+    "Radiografía, ecografía, resonancia magnética, TAC, electrocardiograma, espirometría, endoscopia. "
+    "Hipertensión arterial, diabetes mellitus, dislipemia, cardiopatía isquémica, insuficiencia cardíaca. "
+    "Neumonía, bronquitis, EPOC, asma, gastritis, reflujo gastroesofágico. "
+    "Cefalea, migraña, lumbalgia, cervicalgia, artrosis, artritis, fibromialgia, neuropatía. "
+    "Paracetamol, ibuprofeno, omeprazol, metformina, insulina, enalapril, losartán, atorvastatina. "
+    "Miligramos, comprimidos, cápsulas, posología, cada 8 horas, cada 12 horas, en ayunas. "
+    "Tensión arterial, frecuencia cardíaca, saturación de oxígeno. "
+    "Receta médica, derivación, interconsulta, seguimiento, control, revisión."
+)
+
 # ── Modelos globales (se cargan una vez) ─────────────────────
 whisper_model = None
 diarize_pipeline = None
@@ -36,7 +51,8 @@ async def lifespan(app: FastAPI):
 
     print(f"[init] Cargando modelo Whisper '{DEFAULT_MODEL}' en {DEVICE} ({COMPUTE_TYPE})...")
     whisper_model = whisperx.load_model(
-        DEFAULT_MODEL, DEVICE, compute_type=COMPUTE_TYPE, language="es"
+        DEFAULT_MODEL, DEVICE, compute_type=COMPUTE_TYPE, language="es",
+        asr_options={"initial_prompt": MEDICAL_PROMPT}
     )
 
     print("[init] Cargando modelo de alineación...")
@@ -94,7 +110,7 @@ async def transcribe(
         # 1. Cargar audio
         audio = whisperx.load_audio(tmp_path)
 
-        # 2. Transcribir
+        # 2. Transcribir (vocabulario médico ya configurado en asr_options)
         result = whisper_model.transcribe(
             audio,
             batch_size=8 if DEVICE == "cuda" else 4,

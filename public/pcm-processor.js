@@ -10,7 +10,7 @@ class PcmProcessor extends AudioWorkletProcessor {
     // VAD (Voice Activity Detection) por energía RMS
     this._vadThreshold = 0.008;  // umbral mínimo de RMS para considerar "voz"
     this._silenceFrames = 0;     // frames consecutivos en silencio
-    this._maxSilenceFrames = 12; // ~0.3s de silencio antes de dejar de enviar
+    this._maxSilenceFrames = 20; // ~0.5s de silencio antes de dejar de enviar
     this._speaking = false;
   }
 

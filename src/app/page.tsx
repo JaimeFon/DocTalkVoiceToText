@@ -76,8 +76,12 @@ export default function Home() {
       const newLength = Math.round(buffer.length / ratio);
       const result = new Float32Array(newLength);
       for (let i = 0; i < newLength; i++) {
-        const index = Math.round(i * ratio);
-        result[i] = buffer[Math.min(index, buffer.length - 1)];
+        const srcIdx = i * ratio;
+        const lo = Math.floor(srcIdx);
+        const hi = Math.min(lo + 1, buffer.length - 1);
+        const frac = srcIdx - lo;
+        // Interpolación lineal para evitar aliasing
+        result[i] = buffer[lo] * (1 - frac) + buffer[hi] * frac;
       }
       return result;
     },
@@ -147,7 +151,7 @@ export default function Home() {
           ]);
         }
         if (data.type === "diarization" && data.segments) {
-          // Diarización reemplaza las últimas N entradas sin speaker
+          // Diarización reemplaza entradas sin speaker cuyo texto coincide
           const diarized: TranscriptionEntry[] = data.segments
             .filter((s: { text: string }) => s.text.trim())
             .map((s: { speaker: string | null; text: string }) => ({
@@ -157,12 +161,23 @@ export default function Home() {
             }));
           if (diarized.length > 0) {
             setTranscription((prev) => {
-              // Quitar últimas entradas sin speaker que fueron reemplazadas por diarización
-              const withSpeaker = prev.filter((e) => e.speaker !== null);
-              const withoutSpeaker = prev.filter((e) => e.speaker === null);
-              // Mantener solo entradas sin speaker que son más recientes que la diarización
-              const recentUnspeakered = withoutSpeaker.slice(diarized.length);
-              return [...withSpeaker, ...diarized, ...recentUnspeakered];
+              // Normalizar texto para comparación (minúsc., sin puntuación extra)
+              const normalize = (t: string) => t.toLowerCase().replace(/[.,;:!?…]/g, "").trim();
+              const diarizedTexts = new Set(diarized.map((d) => normalize(d.text)));
+
+              // Mantener entradas con speaker + entradas sin speaker que NO fueron reemplazadas
+              const kept = prev.filter((e) => {
+                if (e.speaker !== null) return true;
+                // Si el texto sin speaker aparece en la diarización, descartarlo
+                const norm = normalize(e.text);
+                // Coincidencia parcial: si algún segmento diarizado contiene este texto o viceversa
+                for (const dt of diarizedTexts) {
+                  if (dt.includes(norm) || norm.includes(dt)) return false;
+                }
+                return true;
+              });
+
+              return [...kept, ...diarized];
             });
           }
         }
@@ -193,6 +208,7 @@ export default function Home() {
           sampleRate: { ideal: TARGET_SAMPLE_RATE },
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true,
         },
       });
       streamRef.current = stream;

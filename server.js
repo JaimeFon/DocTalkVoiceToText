@@ -134,7 +134,7 @@ app.prepare().then(() => {
     console.log("[ws] Cliente conectado");
 
     const SAMPLE_RATE = 16000;
-    const CHUNK_SECONDS = 3;
+    const CHUNK_SECONDS = 6;  // 6s da mejor contexto a Whisper que 3s
     const DIARIZE_SECONDS = 30; // ventana para diarización
     const DIARIZE_OVERLAP = 0.5; // 50% overlap entre ventanas
     const CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE;
@@ -147,6 +147,7 @@ app.prepare().then(() => {
     let diarizeSamples = 0;
     let prevDiarizeChunks = []; // Float32Array[] — overlap de la ventana anterior
     let prevDiarizeSamples = 0;
+    let lastTranscription = ""; // último texto para contexto entre chunks
     let sending = false;
     let diarizing = false;
     const useDiarize = !!diarizeUrl;
@@ -183,7 +184,11 @@ app.prepare().then(() => {
 
       try {
         const wav = pcmToWav(combined, SAMPLE_RATE);
-        const { body, contentType } = buildMultipart(wav, currentModel, "es", MEDICAL_PROMPT);
+        // Condicionar con texto previo + vocabulario médico para coherencia
+        const contextPrompt = lastTranscription
+          ? lastTranscription.slice(-200) + " " + MEDICAL_PROMPT
+          : MEDICAL_PROMPT;
+        const { body, contentType } = buildMultipart(wav, currentModel, "es", contextPrompt);
 
         const resp = await fetch(`${whisperUrl}/v1/audio/transcriptions`, {
           method: "POST",
@@ -196,6 +201,7 @@ app.prepare().then(() => {
           const text = (data.text || "").trim();
           // Filtrar respuestas vacías o repetitivas de Whisper
           if (text && text.length > 1 && clientWs.readyState === 1) {
+            lastTranscription = text; // guardar para contexto del próximo chunk
             clientWs.send(JSON.stringify({ type: "transcription", text: addPunctuation(text), speaker: null }));
           }
         } else {
